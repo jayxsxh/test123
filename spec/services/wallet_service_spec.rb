@@ -14,18 +14,18 @@ describe WalletService do
   let(:service) { WalletService.new(wallet) }
 
   before do
-    Peatio::Blockchain.registry.expects(:[])
+    expect(Peatio::Blockchain.registry).to receive(:[])
                          .with(:fake)
-                         .returns(fake_blockchain_adapter.class)
-                         .at_least_once
+                         .and_return(fake_blockchain_adapter.class)
+                         .at_least(:once)
 
-    Peatio::Wallet.registry.expects(:[])
+    expect(Peatio::Wallet.registry).to receive(:[])
                      .with(:fake)
-                     .returns(fake_wallet_adapter.class)
-                     .at_least_once
+                     .and_return(fake_wallet_adapter.class)
+                     .at_least(:once)
 
 
-    Blockchain.any_instance.stubs(:blockchain_api).returns(BlockchainService.new(blockchain))
+    allow(Blockchain).to receive(:blockchain_api).and_return(BlockchainService.new(blockchain))
   end
 
   context :create_address! do
@@ -37,7 +37,7 @@ describe WalletService do
     end
 
     before do
-      service.adapter.expects(:create_address!).returns(blockchain_address)
+      expect(service.adapter).to receive(:create_address!).and_return(blockchain_address)
     end
 
     it 'creates address' do
@@ -57,7 +57,7 @@ describe WalletService do
 
     before do
       member.get_account(currency).update!(balance: 1000)
-      service.adapter.expects(:create_transaction!).returns(transaction)
+      expect(service.adapter).to receive(:create_transaction!).and_return(transaction)
     end
 
     it 'sends withdrawal' do
@@ -523,6 +523,45 @@ describe WalletService do
           expect(subject).to all(be_a(Peatio::Transaction))
         end
       end
+
+      context 'Partial spread between first, second and third + skip deposit collection option' do
+
+        let(:amount) { 10 }
+
+        let(:destination_wallets) do
+          [{ address: 'destination-wallet-1',
+            balance: 7,
+            max_balance: 10,
+            min_collection_amount: 1,
+            skip_deposit_collection: true },
+          { address: 'destination-wallet-2',
+            balance: 97,
+            max_balance: 100,
+            min_collection_amount: 1 },
+          { address: 'destination-wallet-3',
+            balance: 995.0,
+            max_balance: 1000,
+            min_collection_amount: 1 }]
+        end
+
+        let(:expected_spread) do
+          [{ to_address: 'destination-wallet-2',
+             status: 'pending',
+             amount: 3,
+             currency_id: currency.id },
+           { to_address: 'destination-wallet-3',
+             status: 'pending',
+             amount: 4,
+             currency_id: currency.id}]
+        end
+
+        subject { service.send(:spread_between_wallets, amount, destination_wallets) }
+
+        it 'spreads everything to last wallet' do
+          expect(subject.map(&:as_json).map(&:symbolize_keys)).to contain_exactly(*expected_spread)
+          expect(subject).to all(be_a(Peatio::Transaction))
+        end
+      end
     end
   end
 
@@ -555,7 +594,8 @@ describe WalletService do
     context 'hot wallet is full and cold wallet balance is not available' do
       before do
         # Hot wallet balance is full and cold wallet balance is not available.
-        Wallet.any_instance.stubs(:current_balance).returns(hot_wallet.max_balance, 'N/A')
+        allow(hot_wallet).to receive(:current_balance).and_return(hot_wallet.max_balance)
+        allow(cold_wallet).to receive(:current_balance).and_return('N/A')
       end
 
       it 'spreads everything to cold wallet' do
@@ -570,7 +610,9 @@ describe WalletService do
       let!(:warm_wallet) { create(:wallet, :fake_warm) }
       before do
         # Hot wallet is full, warm and cold wallet balances are not available.
-        Wallet.any_instance.stubs(:current_balance).returns(hot_wallet.max_balance, 'N/A', 'N/A')
+        allow(hot_wallet).to receive(:current_balance).and_return(hot_wallet.max_balance)
+        allow(warm_wallet).to receive(:current_balance).and_return('N/A')
+        allow(cold_wallet).to receive(:current_balance).and_return('N/A')
       end
 
       it 'skips warm wallet and spreads everything to cold wallet' do
@@ -582,10 +624,7 @@ describe WalletService do
     end
 
     context 'there is no active wallets' do
-      before do
-        deposit
-        Wallet.stubs(:active).returns(Wallet.none)
-      end
+      before { allow(Wallet).to receive(:active).and_return(Wallet.none) }
 
       it 'raises an error' do
         expect{ subject }.to raise_error(StandardError)
@@ -705,7 +744,7 @@ describe WalletService do
 
       before do
         deposit.member.payment_address(service.wallet.id).update(address: deposit.address)
-        service.adapter.expects(:create_transaction!).returns(transaction.first)
+        expect(service.adapter).to receive(:create_transaction!).and_return(transaction.first)
       end
 
       it 'creates single transaction' do
@@ -740,8 +779,8 @@ describe WalletService do
 
       before do
         deposit.member.payment_address(service.wallet.id).update(address: deposit.address)
-        service.adapter.expects(:create_transaction!).with(spread_deposit.first, subtract_fee: true).returns(transaction.first)
-        service.adapter.expects(:create_transaction!).with(spread_deposit.second, subtract_fee: true).returns(transaction.second)
+        expect(service.adapter).to receive(:create_transaction!).with(spread_deposit.first, subtract_fee: true).and_return(transaction.first)
+        expect(service.adapter).to receive(:create_transaction!).with(spread_deposit.second, subtract_fee: true).and_return(transaction.second)
       end
 
       it 'creates two transactions' do
@@ -809,10 +848,10 @@ describe WalletService do
 
       before do
         deposit.update!(spread: spread_deposit.map(&:as_json))
-        service.adapter.expects(:prepare_deposit_collection!).returns(transactions)
+        expect(service.adapter).to receive(:prepare_deposit_collection!).and_return(transactions)
       end
 
-      it 'returns transaction' do
+      it 'and_return transaction' do
         expect(subject).to contain_exactly(*transactions)
         expect(subject).to all(be_a(Peatio::Transaction))
         deposit.spread.map { |s| s.key?(:options) }

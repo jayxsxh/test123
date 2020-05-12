@@ -418,8 +418,8 @@ describe API::V2::Admin::Blockchains, type: :request do
       let!(:wallet) { create(:wallet, :fake_deposit, blockchain_key: blockchain.key) }
 
       before do
-        Blockchain.any_instance.stubs(:blockchain_api).returns(service)
-        service.stubs(:latest_block_number).returns(4)
+        allow_any_instance_of(Blockchain).to receive(:blockchain_api).and_return(service)
+        allow(service).to receive(:latest_block_number).and_return(4)
         clear_redis
         PaymentAddress.create!(member: member,
                                wallet: wallet,
@@ -431,7 +431,7 @@ describe API::V2::Admin::Blockchains, type: :request do
         let(:expected_block) { Peatio::Block.new(block_number, [transaction]) }
 
         before do
-          service.adapter.stubs(:fetch_block!).returns(expected_block)
+          allow(service.adapter).to receive(:fetch_block!).and_return(expected_block)
         end
 
         it 'detects in the block' do
@@ -481,8 +481,8 @@ describe API::V2::Admin::Blockchains, type: :request do
         let(:expected_block) { Peatio::Block.new(block_number, [transaction]) }
 
         before do
-          service.adapter.stubs(:fetch_block!).returns(expected_block)
-          service.adapter.stubs(:fetch_transaction).with(transaction).returns(succeed_transaction)
+          allow(service.adapter).to receive(:fetch_block!).and_return(expected_block)
+          allow(service.adapter).to receive(:fetch_transaction).with(transaction).and_return(succeed_transaction)
         end
 
         it 'detects successfuly in the block' do

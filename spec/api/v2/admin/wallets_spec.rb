@@ -49,7 +49,7 @@ describe API::V2::Admin::Wallets, type: :request do
     end
 
     it 'returns wallet balance if node accessible' do
-      wallet.update(balance: { 'eth' => '1'})
+      allow_any_instance_of(WalletService).to receive(:load_balance!).and_return('1')
 
       api_get "/api/v2/admin/wallets/#{wallet.id}", token: token
       expect(response).to be_successful
@@ -177,7 +177,7 @@ describe API::V2::Admin::Wallets, type: :request do
         it 'returns wallet overview' do
           expect(Wallet.where(blockchain_key: 'btc-testnet').map(&:balance).uniq).to eq([nil])
           api_get '/api/v2/admin/wallets/overview', token: token
-          
+
           expect(response).to be_successful
           result = JSON.parse(response.body)
           expect(result[0].except('blockchains')).to eq expected_zero_result[0].except('blockchains')

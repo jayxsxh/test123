@@ -2,11 +2,95 @@
 # frozen_string_literal: true
 
 describe Withdraw do
+  context 'bank withdraw' do
+    describe '#audit!' do
+      subject { create(:usd_withdraw, :with_deposit_liability) }
+      before  { subject.submit! }
+
+      it 'should accept withdraw with clean history' do
+        subject.audit!
+        expect(subject).to be_accepted
+      end
+
+      it 'should accept quick withdraw directly' do
+        subject.update sum: 5
+        subject.audit!
+        expect(subject).to be_accepted
+      end
+    end
+  end
+
+  context 'coin withdraw' do
+    describe '#audit!' do
+      subject { create(:btc_withdraw, :with_deposit_liability, sum: sum) }
+      let(:sum) { 10.to_d }
+      before { subject.submit! }
+
+      xit 'should be rejected if address is invalid' do
+        WalletClient.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: false }))
+        subject.audit!
+        expect(subject).to be_rejected
+      end
+
+      context 'internal recipient' do
+        let(:payment_address) { create(:btc_payment_address) }
+        subject { create(:btc_withdraw, :with_deposit_liability, rid: payment_address.address) }
+
+        around do |example|
+          WebMock.disable_net_connect!
+          example.run
+          WebMock.allow_net_connect!
+        end
+
+        let :request_body do
+          { jsonrpc: '1.0',
+            method:  'validateaddress',
+            params:  [payment_address.address]
+          }.to_json
+        end
+
+        let(:response_body) { '{"result":{"isvalid":true,"ismine":true}}' }
+
+        before do
+          stub_request(:post, 'http://127.0.0.1:18332').with(body: request_body).to_return(body: response_body)
+        end
+
+        it 'permits withdraw to address which belongs to Peatio' do
+          subject.audit!
+          expect(subject).to be_accepted
+        end
+      end
+
+      xit 'should accept withdraw with clean history' do
+        WalletClient.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true }))
+        subject.audit!
+        expect(subject).to be_accepted
+      end
+
+      context 'sum less than quick withdraw limit' do
+        let(:sum) { '0.099'.to_d }
+        xit 'should approve quick withdraw directly' do
+          WalletClient.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true }))
+          subject.audit!
+          expect(subject).to be_processing
+        end
+      end
+    end
+
+    describe 'balance validations' do
+      subject { build :btc_withdraw }
+
+      it 'validates balance' do
+        expect { subject.save }.to raise_error(::Account::AccountError)
+      end
+    end
+  end
+
   context 'aasm_state' do
     subject { create(:usd_withdraw, :with_deposit_liability, sum: 1000) }
 
     before do
-      subject.stubs(:send_withdraw_confirm_email)
+      allow(subject).to receive(:send_withdraw_confirm_email)
     end
 
     it 'initializes with state :prepared' do
@@ -67,7 +151,7 @@ describe Withdraw do
       before { subject.accept! }
 
       it 'transitions to :processing after calling #process! when withdrawing fiat currency' do
-        subject.currency.stubs(:coin?).returns(false)
+        expect(subject).to receive(:coin?).and_return(false)
 
         subject.process!
 
@@ -75,7 +159,7 @@ describe Withdraw do
       end
 
       it 'transitions to :failed after calling #fail! when withdrawing fiat currency' do
-        subject.currency.stubs(:coin?).returns(false)
+        expect(subject).to receive(:coin?).and_return(false)
 
         subject.process!
 
@@ -85,7 +169,7 @@ describe Withdraw do
       end
 
       it 'transitions to :processing after calling #process!' do
-        subject.expects(:send_coins!)
+        expect(subject).to receive(:send_coins!)
 
         subject.process!
 
@@ -461,7 +545,7 @@ describe Withdraw do
 
   context 'fee is set to fixed value of 10' do
     let(:withdraw) { create(:usd_withdraw, :with_deposit_liability, sum: 200) }
-    before { BlockchainCurrency.any_instance.expects(:withdraw_fee).once.returns(10) }
+    before { allow_any_instance_of(Currency).to receive(:withdraw_fee).and_return(10) }
     it 'computes fee' do
       expect(withdraw.fee).to eql 10.to_d
       expect(withdraw.amount).to eql 190.to_d
@@ -469,10 +553,8 @@ describe Withdraw do
   end
 
   context 'fee exceeds amount' do
-    let(:member) { create(:member) }
-    let!(:account) { member.get_account(:usd).tap { |x| x.update!(balance: 200.0.to_d) } }
-    let(:withdraw) { build(:usd_withdraw, sum: 200, member: member) }
-    before { BlockchainCurrency.any_instance.expects(:withdraw_fee).once.returns(200) }
+    let(:withdraw) { build(:usd_withdraw, sum: 200, member: nil) }
+    before { allow_any_instance_of(Currency).to receive(:withdraw_fee).and_return(200) }
     it 'fails validation' do
       expect(withdraw.save).to eq false
       expect(withdraw.errors[:amount]).to match(["must be greater than 0.0"])

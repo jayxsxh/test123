@@ -27,7 +27,7 @@ class Engine < ApplicationRecord
 
   # == Validations ==========================================================
 
-  validates :name, uniqueness: true, presence: true
+  validates :name, uniqueness: { case_sensitive: true }, presence: true
   validates :driver, presence: true
 
   # == Scopes ===============================================================

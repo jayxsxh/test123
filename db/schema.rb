@@ -2,11 +2,11 @@
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
 #
-# Note that this schema.rb definition is the authoritative source for your
-# database schema. If you need to create the application database on another
-# system, you should be using db:schema:load, not running all the migrations
-# from scratch. The latter is a flawed and unsustainable approach (the more migrations
-# you'll amass, the slower it'll run and the greater likelihood for issues).
+# This file is the source Rails uses to define your schema when running `rails
+# db:schema:load`. When creating a new database, `rails db:schema:load` tends to
+# be faster and is potentially less error prone than running all of your
+# migrations from scratch. Old migrations may fail to apply correctly if those
+# migrations use external dependencies or application code.
 #
 # It's strongly recommended that you check this file into your version control system.
 
@@ -119,13 +119,22 @@ ActiveRecord::Schema.define(version: 2021_10_01_083227) do
     t.string "name"
     t.text "description"
     t.string "homepage"
+<<<<<<< HEAD
+=======
+    t.string "blockchain_key", limit: 32
+    t.string "symbol", limit: 1, null: false
+>>>>>>> 93085449 (Add to Currency model description, homepage and price (#2601))
     t.string "type", limit: 30, default: "coin", null: false
     t.bigint "default_network_id"
     t.string "status", limit: 32, default: "enabled", null: false
     t.integer "position", null: false
     t.integer "precision", limit: 1, default: 8, null: false
     t.string "icon_url"
+<<<<<<< HEAD
     t.decimal "price", precision: 32, scale: 16, default: "1.0", null: false
+=======
+    t.decimal "price", precision: 32, scale: 16
+>>>>>>> 93085449 (Add to Currency model description, homepage and price (#2601))
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["position"], name: "index_currencies_on_position"

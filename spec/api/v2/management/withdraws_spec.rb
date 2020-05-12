@@ -251,9 +251,9 @@ describe API::V2::Management::Withdraws, type: :request do
     end
 
     context 'extremely precise values' do
-      before { BlockchainCurrency.any_instance.stubs(:withdraw_fee).returns(BigDecimal(0)) }
-      before { Currency.any_instance.stubs(:precision).returns(16) }
-      before { BlockchainCurrency.any_instance.stubs(:subunits).returns(16) }
+      before { allow_any_instance_of(BlockchainCurrency).to receive(:withdraw_fee).and_return(BigDecimal(0)) }
+      before { allow_any_instance_of(Currency).to receive(:precision).and_return(16) }
+      before { allow_any_instance_of(BlockchainCurrency).to receive(:subunits).and_return(16) }
       it 'keeps precision for amount' do
         data.merge!(amount: '0.0000000123456789')
         request
@@ -459,6 +459,7 @@ describe API::V2::Management::Withdraws, type: :request do
 
       context 'action: :process' do
         before { data[:action] = :process }
+        before { allow_any_instance_of(Withdraw).to receive(:quick?).and_return(true) }
 
         it 'processes prepared withdraws' do
           expect(record.aasm_state).to eq 'prepared'

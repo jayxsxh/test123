@@ -41,7 +41,7 @@ class Wallet < ApplicationRecord
   belongs_to :blockchain, foreign_key: :blockchain_key, primary_key: :key
   has_and_belongs_to_many :currencies
 
-  validates :name,    presence: true, uniqueness: true
+  validates :name,    presence: true, uniqueness: { case_sensitive: true }
   validates :address, presence: true
   validate :gateway_wallet_kind_support
 

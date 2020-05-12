@@ -260,6 +260,7 @@ class WalletService
       unless sp.map(&:amount).sum == original_amount
         raise Error, "Deposit spread failed deposit.amount != collection_spread.values.sum"
       end
+      sp.delete_if { |tr| tr.status == 'skipped' }
     end
   end
 

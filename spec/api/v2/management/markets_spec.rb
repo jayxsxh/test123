@@ -66,7 +66,11 @@ describe API::V2::Management::Markets, type: :request do
       request
 
       expect(response).to have_http_status 422
+<<<<<<< HEAD
       expect(response.body).to match(/position does not have a valid value/i)
+=======
+      expect(response.body).to match(/Position must be greater than or equal to 0/i)
+>>>>>>> 2e2a5ca9 (Update dependencies (#2563))
     end
 
     it 'should validate state param' do

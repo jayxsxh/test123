@@ -94,7 +94,7 @@ describe API::V2::Account::Withdraws, type: :request do
       expect(result.all? { |d| d['blockchain_key'] == 'btc-testnet' }).to be_truthy
     end
 
-    it 'returns withdraws with txid filter' do
+    it 'and_return withdraws with txid filter' do
       api_get '/api/v2/account/withdraws', params: { rid: btc_withdraws.first.rid }, token: token
       result = JSON.parse(response.body)
 
@@ -189,11 +189,11 @@ describe API::V2::Account::Withdraws, type: :request do
     let(:balance) { 1.2 }
     let(:long_note) { (0...257).map { (65 + rand(26)).chr }.join }
     before { account.plus_funds(balance) }
-    before { Vault::TOTP.stubs(:validate?).returns(true) }
+    before { allow(Vault::TOTP).to receive(:validate?).and_return(true) }
 
     context 'extremely precise values' do
-      before { BlockchainCurrency.any_instance.stubs(:withdraw_fee).returns(BigDecimal(0)) }
-      before { Currency.any_instance.stubs(:precision).returns(16) }
+      before { allow_any_instance_of(Currency).to receive(:withdraw_fee).and_return(BigDecimal(0)) }
+      before { allow_any_instance_of(Currency).to receive(:precision).and_return(16) }
       it 'keeps precision for amount' do
         data[:amount] = '0.0000000123456789'
         api_post '/api/v2/account/withdraws', params: data, token: token
@@ -283,7 +283,7 @@ describe API::V2::Account::Withdraws, type: :request do
     end
 
     it 'validates otp code' do
-      Vault::TOTP.stubs(:validate?).returns(false)
+      allow(Vault::TOTP).to receive(:validate?).and_return(false)
       api_post '/api/v2/account/withdraws', params: data, token: token
       expect(response).to have_http_status(422)
       expect(response).to include_api_error('account.withdraw.invalid_otp')
@@ -345,7 +345,7 @@ describe API::V2::Account::Withdraws, type: :request do
         blockchain_currency.update!(withdrawal_enabled: false)
       end
 
-      it 'returns error' do
+      it 'and_return error' do
         api_post '/api/v2/account/withdraws', params: data, token: token
         expect(response).to have_http_status 422
         expect(response).to include_api_error('account.currency.withdrawal_disabled')

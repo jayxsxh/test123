@@ -11,12 +11,8 @@ describe PaymentAddress do
     let!(:addr) { create(:payment_address, :btc_address, address: nil, secret: secret, wallet_id: wallet.id) }
 
     it 'generate address after commit' do
-      AMQP::Queue.expects(:enqueue).with(:deposit_coin_address, { member_id: member.id, wallet_id: wallet.id }, { persistent: true })
-      member.payment_address(wallet.id)
-    end
-
-    it 'blockchain_key same as wallet blockchain_key' do
-      expect(addr.blockchain_key).to eq wallet.blockchain_key
+      allow(AMQP::Queue).to receive(:enqueue).with(:deposit_coin_address, { account_id: account.id }, { persistent: true })
+      account.payment_address
     end
 
     it 'updates secret' do
