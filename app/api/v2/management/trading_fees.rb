@@ -33,6 +33,46 @@ module API
             .tap { |q| present paginate(q), with: API::V2::Entities::TradingFee }
           status 200
         end
+        # PUT: api/v2/management/fee_schedule/trading_fees/update
+        desc 'Update trading fee' do
+          @settings[:scope] = :write_markets
+          success API::V2::Management::Entities::TradingFee
+        end
+        params do
+          requires :id,
+                   type: { value: Integer, message: 'admin.trading_fee.non_integer_id' },
+                   desc: -> { API::V2::Entities::TradingFee.documentation[:id][:desc] }
+          optional :maker,
+                   type: { value: BigDecimal, message: 'admin.trading_fee.non_decimal_maker' },
+                   values: { value: -> (p){ p && p >= 0 }, message: 'admin.trading_fee.invalid_maker' },
+                   desc: -> { API::V2::Entities::TradingFee.documentation[:maker][:desc] }
+          optional :taker,
+                   type: { value: BigDecimal, message: 'admin.trading_fee.non_decimal_taker' },
+                   values: { value: -> (p){ p && p >= 0 }, message: 'admin.trading_fee.invalid_taker' },
+                   desc: -> { API::V2::Entities::TradingFee.documentation[:taker][:desc] }
+          optional :group,
+                   type: String,
+                   coerce_with: ->(c) { c.strip.downcase },
+                   desc: -> { API::V2::Entities::TradingFee.documentation[:group][:desc] }
+          optional :market_id,
+                   type: String,
+                   desc: -> { API::V2::Entities::TradingFee.documentation[:market_id][:desc] },
+                   values: { value: -> { ::Market.spot.pluck(:symbol).append(::TradingFee::ANY) },
+                             message: 'admin.trading_fee.market_doesnt_exist' }
+          optional :market_type,
+                   values: { value: -> { ::Market::TYPES }, message: 'admin.trading_fee.invalid_market_type' },
+                   desc: -> { API::V2::Admin::Entities::Market.documentation[:type] },
+                   default: -> { ::Market::DEFAULT_TYPE }
+        end
+        put '/fee_schedule/trading_fees/update' do
+          trading_fee = TradingFee.find(params[:id])
+          if trading_fee.update(declared(params, include_missing: false).except(:id))
+            present trading_fee, with: API::V2::Management::Entities::TradingFee
+          else
+            body errors: trading_fee.errors.full_messages
+            status 422
+          end
+        end
       end
     end
   end
