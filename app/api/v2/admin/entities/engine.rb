@@ -33,7 +33,15 @@ module API
             :uid,
             documentation: {
               type: String,
-              desc: 'Owner of a engine'
+              desc: 'Owner of an engine'
+            }
+          )
+
+          expose(
+            :url,
+            documentation: {
+              type: String,
+              desc: 'URL of an engine'
             }
           )
 
