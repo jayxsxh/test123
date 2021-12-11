@@ -94,7 +94,7 @@ module API
           beneficiary = current_user
                           .beneficiaries
                           .available_to_member
-                          .find_by(id: params[:beneficiary_id])
+                          .find_by(id: params[:beneficiary_id], currency_id: params[:currency])
 
           if beneficiary.blank?
             error!({ errors: ['account.beneficiary.doesnt_exist'] }, 422)

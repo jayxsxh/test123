@@ -232,6 +232,20 @@ describe API::V2::Account::Withdraws, type: :request do
       end
     end
 
+    it 'beneficiary_id belong to currency' do
+      eth_beneficiary = create(
+        :beneficiary,
+        member: member,
+        state: :active,
+        currency: Currency.find(:eth)
+      )
+      data.merge!(beneficiary_id: eth_beneficiary.id)
+      api_post '/api/v2/account/withdraws', params: data, token: token
+
+      expect(response).to have_http_status(422)
+      expect(response).to include_api_error('account.beneficiary.doesnt_exist')
+    end
+
     it 'requires beneficiary_id' do
       data[:beneficiary_id] = nil
       api_post '/api/v2/account/withdraws', params: data, token: token
