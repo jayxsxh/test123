@@ -140,7 +140,6 @@ class Beneficiary < ApplicationRecord
 
     data.each do |k, v|
       if !pattern.match?(v)
-        binding.pry
         return errors.add(:data, 'only letters, digits "-", ",", "\'", ".", "~" and space allowed')
       end
     end
