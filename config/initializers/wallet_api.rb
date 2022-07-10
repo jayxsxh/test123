@@ -1,4 +1,5 @@
 Peatio::Wallet.registry[:bitcoind] = Bitcoin::Wallet
+Peatio::Wallet.registry[:tyzend] = Tyzen::Wallet
 Peatio::Wallet.registry[:geth] = Ethereum::Eth::Wallet
 Peatio::Wallet.registry[:parity] = Ethereum::Eth::Wallet
 Peatio::Wallet.registry[:gnosis] = Gnosis::Wallet
