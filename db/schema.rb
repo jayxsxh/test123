@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2021_04_26_083359) do
+ActiveRecord::Schema.define(version: 2021_08_06_081219) do
 
   create_table "accounts", primary_key: ["currency_id", "member_id"], options: "ENGINE=InnoDB DEFAULT CHARSET=utf8", force: :cascade do |t|
     t.bigint "member_id", null: false
@@ -72,7 +72,7 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
     t.string "key", null: false
     t.string "name"
     t.string "client", null: false
-    t.string "server"
+    t.string "server_encrypted", limit: 1024
     t.bigint "height", null: false
     t.string "explorer_address"
     t.string "explorer_transaction"
@@ -127,7 +127,7 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
     t.string "currency_id", limit: 10, null: false
     t.decimal "amount", precision: 32, scale: 16, null: false
     t.decimal "fee", precision: 32, scale: 16, null: false
-    t.string "address", limit: 95
+    t.string "address", limit: 105
     t.text "from_addresses"
     t.string "txid", limit: 128, collation: "utf8_bin"
     t.integer "txout"
@@ -235,7 +235,7 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
 
   create_table "members", options: "ENGINE=InnoDB DEFAULT CHARSET=utf8", force: :cascade do |t|
     t.string "uid", limit: 32, null: false
-    t.string "email", null: false
+    t.string "email"
     t.integer "level", null: false
     t.string "role", limit: 16, null: false
     t.string "group", limit: 32, default: "vip-0", null: false
@@ -271,6 +271,8 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
     t.string "ask", limit: 10, null: false
     t.string "market_id", limit: 20, null: false
     t.string "market_type", default: "spot", null: false
+    t.decimal "trigger_price", precision: 32, scale: 16
+    t.datetime "triggered_at"
     t.decimal "price", precision: 32, scale: 16
     t.decimal "volume", precision: 32, scale: 16, null: false
     t.decimal "origin_volume", precision: 32, scale: 16, null: false
@@ -299,7 +301,7 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
   create_table "payment_addresses", options: "ENGINE=InnoDB DEFAULT CHARSET=utf8", force: :cascade do |t|
     t.bigint "member_id"
     t.bigint "wallet_id"
-    t.string "address", limit: 95
+    t.string "address", limit: 105
     t.boolean "remote", default: false, null: false
     t.string "secret_encrypted"
     t.string "details_encrypted", limit: 1024
@@ -426,24 +428,13 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
     t.index ["key"], name: "index_transfers_on_key", unique: true
   end
 
-  create_table "triggers", options: "ENGINE=InnoDB DEFAULT CHARSET=utf8", force: :cascade do |t|
-    t.bigint "order_id", null: false
-    t.integer "order_type", limit: 1, null: false, unsigned: true
-    t.binary "value", limit: 128, null: false
-    t.integer "state", limit: 1, default: 0, null: false, unsigned: true
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["order_id"], name: "index_triggers_on_order_id"
-    t.index ["order_type"], name: "index_triggers_on_order_type"
-    t.index ["state"], name: "index_triggers_on_state"
-  end
-
   create_table "wallets", options: "ENGINE=InnoDB DEFAULT CHARSET=utf8", force: :cascade do |t|
     t.string "blockchain_key", limit: 32
     t.string "name", limit: 64
     t.string "address", null: false
     t.integer "kind", null: false
     t.string "gateway", limit: 20, default: "", null: false
+    t.json "plain_settings"
     t.string "settings_encrypted", limit: 1024
     t.json "balance"
     t.decimal "max_balance", precision: 32, scale: 16, default: "0.0", null: false
@@ -491,6 +482,7 @@ ActiveRecord::Schema.define(version: 2021_04_26_083359) do
     t.integer "transfer_type"
     t.string "tid", limit: 64, null: false, collation: "utf8_bin"
     t.string "rid", limit: 256, null: false
+    t.string "remote_id"
     t.string "note", limit: 256
     t.json "metadata"
     t.json "error"

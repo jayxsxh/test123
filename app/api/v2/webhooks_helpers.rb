@@ -10,6 +10,35 @@ module API
           process_withdraw_event(request)
         elsif request.params[:event] == 'deposit_address'
           process_deposit_address_event(request)
+        elsif request.params[:event] == 'generic'
+          process_generic_event(request)
+        end
+      end
+
+      def process_generic_event(request)
+        Wallet.active_retired.where(kind: :deposit, gateway: request.params[:adapter]).each do |w|
+          service = w.service
+
+          next unless service.adapter.respond_to?(:trigger_webhook_event)
+
+          transactions = service.trigger_webhook_event(request)
+          unless transactions.present?
+            Rails.logger.info { "Transactions not found for wallet #{w.name} with gateway #{w.gateway}" }
+            next
+          end
+          Rails.logger.info { "Fetched transactions: #{transactions.inspect}" }
+
+          # Process all deposit transactions
+          accepted_deposits = []
+          ActiveRecord::Base.transaction do
+            accepted_deposits = process_deposit(transactions)
+          end
+          accepted_deposits.each(&:process!) if accepted_deposits.present?
+
+          # Process all withdrawal transactions
+          ActiveRecord::Base.transaction do
+            update_generic_withdrawal(transactions)
+          end
         end
       end
 
@@ -29,7 +58,7 @@ module API
 
       def process_deposit_event(request)
         # For deposit events we use only Deposit wallets.
-        Wallet.where(status: :active, kind: :deposit, gateway: request.params[:adapter]).each do |w|
+        Wallet.active_retired.where(kind: :deposit, gateway: request.params[:adapter]).each do |w|
           service = w.service
 
           next unless service.adapter.respond_to?(:trigger_webhook_event)
@@ -47,7 +76,7 @@ module API
 
       def process_withdraw_event(request)
         # For withdraw events we use only Withdraw events.
-        Wallet.where(status: :active, kind: :hot, gateway: request.params[:adapter]).each do |w|
+        Wallet.active_retired.where(kind: :hot, gateway: request.params[:adapter]).each do |w|
           service = w.service
 
           next unless service.adapter.respond_to?(:trigger_webhook_event)
@@ -82,6 +111,12 @@ module API
             end
           end
 
+          if transaction.options.present? &&
+             transaction.options[:remote_id].present? &&
+             transaction.hash.empty?
+            next
+          end
+
           deposit =
             Deposits::Coin.find_or_create_by!(
               currency_id: transaction.currency_id,
@@ -108,6 +143,12 @@ module API
         transactions.each do |transaction|
           if transaction.options.present? && transaction.options[:tid].present?
             withdraw = Withdraws::Coin.find_by(tid: transaction.options[:tid])
+
+            if transaction.status == "failed"
+              withdraw.fail!
+              next
+            end
+
             if withdraw.present? && withdraw.txid.blank?
               withdraw.txid = transaction.hash
               withdraw.save!
@@ -130,6 +171,34 @@ module API
             withdrawal.success!
           elsif transaction.status.rejected?
             withdrawal.reject!
+          end
+        end
+      end
+
+      def update_generic_withdrawal(transactions)
+        transactions.each do |transaction|
+          withdraw = Withdraws::Coin.find_by(remote_id: transaction.options[:remote_id])
+
+          if withdraw.blank?
+            Rails.logger.info { "Skipped withdrawal: #{transaction.hash}." }
+            next
+          end
+
+          if transaction.options.present? && transaction.options[:remote_id].present?
+            if withdraw.txid.blank? && transaction.hash.present?
+              withdraw.txid = transaction.hash
+              withdraw.save!
+              withdraw.dispatch!
+            end
+          end
+
+          Rails.logger.info { "Withdraw transaction detected: #{transaction.inspect}" }
+          if transaction.status.failed?
+            withdraw.fail!
+          elsif transaction.status.success?
+            withdraw.success!
+          elsif transaction.status.rejected?
+            withdraw.reject!
           end
         end
       end

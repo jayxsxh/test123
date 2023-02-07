@@ -2,13 +2,12 @@
 # frozen_string_literal: true
 
 source 'https://rubygems.org'
-git_source(:github) { |repo_slug| "https://github.com/#{repo_slug}" }
 
 ruby '~> 2.6'
 
 gem 'ransack', '~> 2.3.2'
 gem 'rails', '~> 5.2.4.5'
-gem 'puma', '~> 3.12.2'
+gem 'puma', '~> 4.3.8'
 gem 'mysql2', '~> 0.5.2'
 gem 'redis', '~> 4.1.2', require: ['redis', 'redis/connection/hiredis']
 gem 'hiredis', '~> 0.6.0'
