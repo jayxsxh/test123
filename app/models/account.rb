@@ -2,9 +2,13 @@
 
 class Account < ApplicationRecord
   AccountError = Class.new(StandardError)
+  DEFAULT_TYPE = Peatio::App.config.default_account_type
 
-  self.primary_keys = :currency_id, :member_id
+  self.primary_keys = :currency_id, :member_id, :type
 
+  TYPES = Peatio::App.config.account_types.split(',') << DEFAULT_TYPE
+
+  self.inheritance_column = nil
   belongs_to :currency, required: true
   belongs_to :member, required: true
 
@@ -12,10 +16,10 @@ class Account < ApplicationRecord
 
   ZERO = 0.to_d
 
-  validates :member_id, uniqueness: { scope: :currency_id }
+  validates :member_id, uniqueness: { scope: %i[currency_id type] }
   validates :balance, :locked, numericality: { greater_than_or_equal_to: 0.to_d }
 
-  scope :visible, -> { joins(:currency).merge(Currency.where(visible: true)) }
+  scope :visible, -> { joins(:currency).merge(Currency.visible) }
   scope :ordered, -> { joins(:currency).order(position: :asc) }
 
   def as_json_for_event_api
@@ -137,13 +141,13 @@ class Account < ApplicationRecord
 end
 
 # == Schema Information
-# Schema version: 20201125134745
+# Schema version: 20211001083227
 #
 # Table name: accounts
 #
-#  id          :integer          not null, primary key
-#  member_id   :integer          not null
-#  currency_id :string(10)       not null
+#  member_id   :bigint           not null, primary key
+#  currency_id :string(10)       not null, primary key
+#  type        :string(255)      default("spot"), not null, primary key
 #  balance     :decimal(32, 16)  default(0.0), not null
 #  locked      :decimal(32, 16)  default(0.0), not null
 #  created_at  :datetime         not null
@@ -151,6 +155,6 @@ end
 #
 # Indexes
 #
-#  index_accounts_on_currency_id_and_member_id  (currency_id,member_id) UNIQUE
-#  index_accounts_on_member_id                  (member_id)
+#  index_accounts_on_currency_id_and_member_id_and_type_and_unique  (currency_id,member_id,type) UNIQUE
+#  index_accounts_on_member_id                                      (member_id)
 #

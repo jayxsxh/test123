@@ -51,7 +51,7 @@ namespace :import do
       uid = row[:uid]
       member = Member.find_by_uid!(uid)
       currency = Currency.find(row[:currency_id])
-      account = Account.find_or_create_by!(member: member, currency: currency)
+      account = Account.find_or_create_by!(member: member, currency: currency, type: ::Account::DEFAULT_TYPE)
       main_balance = row[:main_balance].to_d
       locked_balance = row[:locked_balance].to_d
       next if args[:balance_check] == 'true' && main_balance <= 0 && locked_balance <= 0
@@ -104,7 +104,7 @@ namespace :import do
       row = row.to_h.compact.symbolize_keys!
       uid = row[:uid]
       member = Member.find_by_uid!(uid)
-      wallet = Wallet.deposit_wallet(row[:currency_id])
+      wallet = Wallet.active_deposit_wallet(row[:currency_id])
       PaymentAddress.create(member_id: member.id, wallet_id: wallet.id, address: row[:address], secret: row[:secret], details: row[:details])
       count += 1
     rescue StandardError => e

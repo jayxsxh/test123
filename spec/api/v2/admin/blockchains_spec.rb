@@ -96,7 +96,7 @@ describe API::V2::Admin::Blockchains, type: :request do
       expect(response).to be_successful
 
       result = JSON.parse(response.body)
-      expect(result.size).to eq 3
+      expect(result.size).to eq 4
     end
 
     it 'returns blockchains by ascending order' do
@@ -113,16 +113,16 @@ describe API::V2::Admin::Blockchains, type: :request do
 
       expect(response).to be_successful
 
-      expect(response.headers.fetch('Total')).to eq '3'
+      expect(response.headers.fetch('Total')).to eq '4'
       expect(result.size).to eq 2
-      expect(result.first['key']).to eq 'eth-kovan'
+      expect(result.first['key']).to eq 'btc-testnet'
 
       api_get '/api/v2/admin/blockchains', params: { limit: 1, page: 2 }, token: token
       result = JSON.parse(response.body)
 
       expect(response).to be_successful
 
-      expect(response.headers.fetch('Total')).to eq '3'
+      expect(response.headers.fetch('Total')).to eq '4'
       expect(result.size).to eq 1
       expect(result.first['key']).to eq 'eth-rinkeby'
     end
@@ -200,11 +200,23 @@ describe API::V2::Admin::Blockchains, type: :request do
 
   describe 'POST /api/v2/admin/blockchains/new' do
     it 'creates new blockchain' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth',server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test'}
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1',
+                                                                        explorer_transaction: 'test', explorer_address: 'test', height: 123333,
+                                                                        warning: 'Warning', description: 'Description', protocol: 'Protocol',
+                                                                        min_deposit_amount: 1, min_withdraw_amount: 2, withdraw_fee: 0.1,
+                                                                        collection_gas_speed: 'standard', withdrawal_gas_speed: 'fast'}
       result = JSON.parse(response.body)
 
       expect(response).to be_successful
       expect(result['key']).to eq 'test-blockchain'
+      expect(result['warning']).to eq 'Warning'
+      expect(result['description']).to eq 'Description'
+      expect(result['protocol']).to eq 'Protocol'
+      expect(result['min_deposit_amount']).to eq '1.0'
+      expect(result['min_withdraw_amount']).to eq '2.0'
+      expect(result['withdraw_fee']).to eq '0.1'
+      expect(result['collection_gas_speed']).to eq 'standard'
+      expect(result['withdrawal_gas_speed']).to eq 'fast'
     end
 
     it 'long blockchain key' do
@@ -214,31 +226,43 @@ describe API::V2::Admin::Blockchains, type: :request do
     end
 
     it 'long blockchain name' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: Faker::String.random(24), name: Faker::String.random(1024), client: 'geth',server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test'}
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: Faker::String.random(24), name: Faker::String.random(1024), client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test'}
       expect(response).not_to be_successful
       expect(response).to include_api_error('admin.blockchain.name_too_long')
     end
 
     it 'validate height param' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth',server: 'http://127.0.0.1', height: -123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: -123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
       expect(response).to have_http_status 422
       expect(response).to include_api_error('admin.blockchain.non_positive_height')
     end
 
     it 'validate min_confirmations param' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth',server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: -6, step: 2 }
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: -6, step: 2 }
       expect(response).to have_http_status 422
       expect(response).to include_api_error('admin.blockchain.non_positive_min_confirmations')
     end
 
     it 'validate status param' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth',server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'actived', min_confirmations: 6, step: 2 }
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'actived', min_confirmations: 6, step: 2 }
       expect(response).to have_http_status 422
       expect(response).to include_api_error('admin.blockchain.invalid_status')
     end
 
+    it 'validate collection_gas_speed param' do
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', collection_gas_speed: 'test', min_confirmations: 6, step: 2 }
+      expect(response).to have_http_status 422
+      expect(response).to include_api_error('admin.blockchain.invalid_collection_gas_speed')
+    end
+
+    it 'validate withdrawal_gas_speed param' do
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', withdrawal_gas_speed: 'test', min_confirmations: 6, step: 2 }
+      expect(response).to have_http_status 422
+      expect(response).to include_api_error('admin.blockchain.invalid_withdrawal_gas_speed')
+    end
+
     it 'validate client param' do
-      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'gezz',server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
+      api_post '/api/v2/admin/blockchains/new', token: token, params: { key: 'test-blockchain', name: 'Test', client: 'gezz', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
       expect(response).to have_http_status 422
       expect(response).to include_api_error('admin.blockchain.invalid_client')
     end
@@ -261,7 +285,7 @@ describe API::V2::Admin::Blockchains, type: :request do
     end
 
     it 'return error in case of not permitted ability' do
-      api_post '/api/v2/admin/blockchains/new', token: level_3_member_token, params: { key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
+      api_post '/api/v2/admin/blockchains/new', token: level_3_member_token, params: { protocol: 'Test', key: 'test-blockchain', name: 'Test', client: 'geth', server: 'http://127.0.0.1', height: 123333, explorer_transaction: 'test', explorer_address: 'test', status: 'active', min_confirmations: 6, step: 2 }
       expect(response.code).to eq '403'
       expect(response).to include_api_error('admin.ability.not_permitted')
     end
@@ -285,11 +309,21 @@ describe API::V2::Admin::Blockchains, type: :request do
       end
 
       it 'returns updated blockchain' do
-        api_post '/api/v2/admin/blockchains/update', params: { name: 'Test Blockchain', id: Blockchain.first.id }, token: token
+        api_post '/api/v2/admin/blockchains/update', params: { name: 'Test Blockchain', id: Blockchain.first.id, warning: 'Warning', description: 'Description', protocol: 'Protocol',
+                                                               min_deposit_amount: 1, min_withdraw_amount: 2, withdraw_fee: 0.1,
+                                                               collection_gas_speed: 'standard', withdrawal_gas_speed: 'fast' }, token: token
         result = JSON.parse(response.body)
 
         expect(response).to be_successful
         expect(result['name']).to eq 'Test Blockchain'
+        expect(result['warning']).to eq 'Warning'
+        expect(result['description']).to eq 'Description'
+        expect(result['protocol']).to eq 'Protocol'
+        expect(result['min_deposit_amount']).to eq '1.0'
+        expect(result['min_withdraw_amount']).to eq '2.0'
+        expect(result['withdraw_fee']).to eq '0.1'
+        expect(result['collection_gas_speed']).to eq 'standard'
+        expect(result['withdrawal_gas_speed']).to eq 'fast'
       end
     end
 
@@ -313,6 +347,18 @@ describe API::V2::Admin::Blockchains, type: :request do
       api_post '/api/v2/admin/blockchains/update', token: token, params: { key: Faker::String.random(1024) }
       expect(response).not_to be_successful
       expect(response).to include_api_error('admin.blockchain.key_too_long')
+    end
+
+    it 'validate collection_gas_speed param' do
+      api_post '/api/v2/admin/blockchains/update', token: token, params: { id: Blockchain.first.id, collection_gas_speed: 'test' }
+      expect(response).to have_http_status 422
+      expect(response).to include_api_error('admin.blockchain.invalid_collection_gas_speed')
+    end
+
+    it 'validate withdrawal_gas_speed param' do
+      api_post '/api/v2/admin/blockchains/update', token: token, params: {  id: Blockchain.first.id, withdrawal_gas_speed: 'test'}
+      expect(response).to have_http_status 422
+      expect(response).to include_api_error('admin.blockchain.invalid_withdrawal_gas_speed')
     end
 
     it 'long blockchain name' do
@@ -365,10 +411,11 @@ describe API::V2::Admin::Blockchains, type: :request do
       let!(:blockchain) { Blockchain.find_by(key: 'btc-testnet') }
       let(:service) { BlockchainService.new(blockchain) }
       let!(:currency) { create(:currency, :btc, id: 'fake') }
+      let!(:blockchain_currency) { BlockchainCurrency.create(currency_id: 'fake', blockchain_key: blockchain.key)}
       let(:block_number) { 3 }
       let!(:member) { create(:member) }
       let!(:fake_blockchain) { create(:blockchain, 'fake-testnet') }
-      let!(:wallet) { create(:wallet, :fake_deposit) }
+      let!(:wallet) { create(:wallet, :fake_deposit, blockchain_key: blockchain.key) }
 
       before do
         Blockchain.any_instance.stubs(:blockchain_api).returns(service)
@@ -388,12 +435,11 @@ describe API::V2::Admin::Blockchains, type: :request do
         end
 
         it 'detects in the block' do
-          expect(Deposits::Coin.where(currency: currency).exists?).to be false
+          expect(Deposits::Coin.where(currency: currency, blockchain_key: blockchain.key).exists?).to be false
 
           api_post '/api/v2/admin/blockchains/process_block', token: token, params: { block_number: block_number, id: blockchain.id }
-          result = JSON.parse(response.body)
           expect(response).to be_successful
-          expect(Deposits::Coin.where(currency: currency).exists?).to be true
+          expect(Deposits::Coin.where(currency: currency, blockchain_key: blockchain.key).exists?).to be true
         end
 
         it 'doesn\'t update height of blockchain' do
@@ -416,17 +462,20 @@ describe API::V2::Admin::Blockchains, type: :request do
                            amount: 1,
                            txid: "fake_hash",
                            rid: 'fake_address',
+                           blockchain_key: 'btc-testnet',
                            sum: 1,
                            type: Withdraws::Coin,
                            aasm_state: :confirming)
         end
 
+        let!(:tx) { Transaction.create(txid: withdrawal.txid, reference: withdrawal, kind: 'tx', from_address: 'fake_address', to_address: withdrawal.rid, blockchain_key: withdrawal.blockchain_key, status: :pending, currency_id: withdrawal.currency_id) }
+
         let!(:transaction) do
-          Peatio::Transaction.new(hash: 'fake_hash', to_address: 'fake_address', amount: 1, block_number: block_number, currency_id: currency.id, txout: 10, status: 'pending')
+          Peatio::Transaction.new(hash: 'fake_hash', to_address: 'fake_address', amount: 1, block_number: block_number, fee: 0.1, fee_currency_id: currency.id, currency_id: currency.id, txout: 10, status: 'pending')
         end
 
         let!(:succeed_transaction) do
-          Peatio::Transaction.new(hash: 'fake_hash', to_address: 'fake_address', from_addresses: ['fake_address'], amount: 1, block_number: block_number, currency_id: currency.id, txout: 10, status: 'success')
+          Peatio::Transaction.new(hash: 'fake_hash', to_address: 'fake_address', from_addresses: ['fake_address'], amount: 1, block_number: block_number, fee: 0.01, fee_currency_id: currency.id, currency_id: currency.id, txout: 10, status: 'success')
         end
 
         let(:expected_block) { Peatio::Block.new(block_number, [transaction]) }
@@ -440,7 +489,6 @@ describe API::V2::Admin::Blockchains, type: :request do
           expect(Withdraws::Coin.find_by(currency: currency, txid: transaction.hash).succeed?).to be false
 
           api_post '/api/v2/admin/blockchains/process_block', token: token, params: { block_number: block_number, id: blockchain.id }
-          result = JSON.parse(response.body)
           expect(response).to be_successful
           expect(Withdraws::Coin.find_by(currency: currency, txid: transaction.hash).succeed?).to be true
         end

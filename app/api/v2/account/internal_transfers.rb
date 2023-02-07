@@ -61,10 +61,6 @@ module API
               error!({ errors: ['account.internal_transfer.invalid_otp'] }, 422)
             end
 
-            if current_user.get_account(currency).balance < params[:amount]
-              error!({ errors: ['account.internal_transfer.insufficient_balance'] }, 422)
-            end
-
             if current_user == receiver
               error!({ errors: ['account.internal_transfer.can_not_tranfer_to_yourself'] }, 422)
             end
@@ -82,6 +78,13 @@ module API
               body errors: internal_transfer.errors.full_messages
               status 422
             end
+
+          rescue ::Account::AccountError => e
+            report_api_error(e, request)
+            error!({ errors: ['account.internal_transfer.insufficient_balance'] }, 422)
+          rescue => e
+            report_exception(e)
+            error!({ errors: ['account.internal_transfer.create_error'] }, 422)
           end
         end
       end

@@ -2,13 +2,12 @@
 # frozen_string_literal: true
 
 source 'https://rubygems.org'
-git_source(:github) { |repo_slug| "https://github.com/#{repo_slug}" }
 
 ruby '~> 2.6'
 
 gem 'ransack', '~> 2.3.2'
 gem 'rails', '~> 5.2.4.5'
-gem 'puma', '~> 3.12.2'
+gem 'puma', '~> 4.3.8'
 gem 'mysql2', '~> 0.5.2'
 gem 'redis', '~> 4.1.2', require: ['redis', 'redis/connection/hiredis']
 gem 'hiredis', '~> 0.6.0'
@@ -46,13 +45,12 @@ gem 'jwt-multisig', '~> 1.0.0'
 gem 'cash-addr', '~> 0.2.0', require: 'cash_addr'
 gem 'digest-sha3', '~> 1.1.0'
 gem 'scout_apm', '~> 2.4', require: false
-gem 'peatio', '~> 2.6.3'
+gem 'peatio', '~> 2.6.5'
 gem 'irix', '~> 2.6.0'
 gem 'rack-cors', '~> 1.0.6', require: false
 gem 'jwt-rack', '~> 0.1.0', require: false
 gem 'env-tweaks', '~> 1.0.0'
 gem 'vault', '~> 0.12', require: false
-gem 'vault-rails', git: 'http://github.com/rubykube/vault-rails'
 gem 'bootsnap', '>= 1.1.0', require: false
 gem 'net-http-persistent', '~> 3.0.1'
 gem 'influxdb', '~> 0.7.0'

@@ -16,6 +16,11 @@ class PaymentAddress < ApplicationRecord
 
   belongs_to :wallet
   belongs_to :member
+  belongs_to :blockchain, foreign_key: :blockchain_key, primary_key: :key, required: true
+
+  before_validation do
+    self.blockchain_key = wallet.blockchain_key
+  end
 
   before_validation do
     next if blockchain_api&.case_sensitive?
@@ -27,8 +32,9 @@ class PaymentAddress < ApplicationRecord
     self.address = CashAddr::Converter.to_cash_address(address)
   end
 
+
   def blockchain_api
-    BlockchainService.new(wallet.blockchain)
+    BlockchainService.new(blockchain)
   end
 
   def enqueue_address_generation
@@ -47,22 +53,33 @@ class PaymentAddress < ApplicationRecord
     CashAddr::Converter.to_cash_address(address)
   end
 
+  def status
+    if address.present?
+      # In case when wallet was deleted and payment address still exists in DB
+      wallet.present? ? wallet.status : ''
+    else
+      'pending'
+    end
+  end
+
   def trigger_address_event
     ::AMQP::Queue.enqueue_event('private', member.uid, :deposit_address, type: :create,
-                          currencies: wallet.currencies.codes,
-                          address:  address)
+                                currencies: wallet.currencies.codes,
+                                blockchain_key: blockchain_key,
+                                address:  address)
   end
 end
 
 # == Schema Information
-# Schema version: 20210128083207
+# Schema version: 20211001083227
 #
 # Table name: payment_addresses
 #
-#  id                :integer          not null, primary key
+#  id                :bigint           not null, primary key
 #  member_id         :bigint
 #  wallet_id         :bigint
-#  address           :string(95)
+#  blockchain_key    :string(255)      not null
+#  address           :string(105)
 #  remote            :boolean          default(FALSE), not null
 #  secret_encrypted  :string(255)
 #  details_encrypted :string(1024)

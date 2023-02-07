@@ -71,6 +71,13 @@ describe API::V2::Management::Deposits, type: :request do
       expect(JSON.parse(response.body).count).to eq Deposit.where(currency_id: :usd).count
     end
 
+    it 'filters by blockchain_key' do
+      data.merge!(blockchain_key: 'btc-testnet')
+      request
+      expect(response).to have_http_status(200)
+      expect(JSON.parse(response.body).count).to eq Deposit.where(blockchain_key: 'btc-testnet').count
+    end
+
     it 'returns with from_id' do
       from_id = Deposit.count / 2
       data.merge!(from_id: from_id)
@@ -87,6 +94,7 @@ describe API::V2::Management::Deposits, type: :request do
     let(:amount) { 750.77 }
     let :data do
       { uid:      member.uid,
+        blockchain_key: 'fiat',
         currency: currency.code,
         amount:   amount.to_s }
     end
@@ -104,6 +112,7 @@ describe API::V2::Management::Deposits, type: :request do
       expect(record.aasm_state).to eq 'submitted'
       expect(record.account).to eq member.get_account(currency)
       expect(response_body['transfer_type']).to eq 'fiat'
+      expect(response_body['blockchain_key']).to eq('fiat')
     end
 
     it 'can create fiat deposit and immediately accept it' do
@@ -170,7 +179,7 @@ describe API::V2::Management::Deposits, type: :request do
 
     context 'disabled currency' do
       before do
-        currency.update(deposit_enabled: false)
+        BlockchainCurrency.find_by(currency_id: currency.id).update(deposit_enabled: false)
       end
 
       it 'returns error for enabled disabled deposit' do
@@ -208,7 +217,7 @@ describe API::V2::Management::Deposits, type: :request do
     let(:signers) { %i[alex jeff] }
     let(:data) { { tid: record.tid } }
     let(:account) { member.get_account(currency) }
-    let(:record) { Deposits::Fiat.create!(member: member, amount: amount, currency: currency) }
+    let(:record) { Deposits::Fiat.create!(member: member, blockchain_key: 'fiat', amount: amount, currency: currency) }
 
     context 'coin deposit' do
       let(:record) { create(:deposit_btc) }

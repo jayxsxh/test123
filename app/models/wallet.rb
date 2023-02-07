@@ -5,6 +5,7 @@ class Wallet < ApplicationRecord
   extend Enumerize
 
   serialize :balance, JSON unless Rails.configuration.database_support_json
+  serialize :plain_settings, JSON unless Rails.configuration.database_support_json
 
   include Vault::EncryptedModel
 
@@ -18,6 +19,10 @@ class Wallet < ApplicationRecord
   enumerize :kind, in: ENUMERIZED_KINDS, scope: true
 
   SETTING_ATTRIBUTES = %i[ uri secret ].freeze
+  STATES = %w[active disabled retired].freeze
+  # active - system use active wallets for all user transactions transfers.
+  # retired - system use retired wallet only to accept deposits.
+  # disabled - system don't use disabled wallets in user transactions transfers.
 
   SETTING_ATTRIBUTES.each do |attribute|
     define_method attribute do
@@ -38,14 +43,16 @@ class Wallet < ApplicationRecord
 
   validates :name,    presence: true, uniqueness: true
   validates :address, presence: true
+  validate :gateway_wallet_kind_support
 
-  validates :status,  inclusion: { in: %w[active disabled] }
+  validates :status,  inclusion: { in: STATES }
 
   validates :gateway, inclusion: { in: ->(_){ Wallet.gateways.map(&:to_s) } }
 
   validates :max_balance, numericality: { greater_than_or_equal_to: 0 }
 
   scope :active,   -> { where(status: :active) }
+  scope :active_retired, -> { where(status: %w[active retired]) }
   scope :deposit,  -> { where(kind: kinds(deposit: true, values: true)) }
   scope :fee,      -> { where(kind: kinds(fee: true, values: true)) }
   scope :withdraw, -> { where(kind: kinds(withdraw: true, values: true)) }
@@ -104,10 +111,39 @@ class Wallet < ApplicationRecord
         end
     end
 
-    def deposit_wallet(currency_id)
-      Wallet.active.deposit.joins(:currencies).find_by(currencies: { id: currency_id })
+    # Returns active/retired deposit wallets per network
+    def deposit_wallets(currency_id, blockchain_key=nil)
+      if blockchain_key
+        Wallet.active_retired.deposit.joins(:currencies).where(currencies: { id: currency_id }, blockchain_key: blockchain_key)
+      else
+        Wallet.active_retired.deposit.joins(:currencies).where(currencies: { id: currency_id })
+      end
+    end
+
+    # Returns active deposit wallets
+    def active_deposit_wallets(currency_id)
+      Wallet.active.deposit.joins(:currencies).where(currencies: { id: currency_id })
+    end
+
+    # Returns current active deposit wallet per network
+    def active_deposit_wallet(currency_id, blockchain_key=nil)
+      if blockchain_key
+        Wallet.active.deposit.joins(:currencies).find_by(currencies: { id: currency_id }, blockchain_key: blockchain_key)
+      else
+        Wallet.active.deposit.joins(:currencies).find_by(currencies: { id: currency_id })
+      end
+    end
+
+    def uniq(array)
+      if ActiveRecord::Base.connection.adapter_name == "PostgreSQL"
+        array.select("DISTINCT ON (wallets.id) wallets.*")
+      else
+        array.distinct
+      end
     end
   end
+
+  delegate :protocol, to: :blockchain
 
   def current_balance(currency = nil)
     if currency.present?
@@ -125,6 +161,12 @@ class Wallet < ApplicationRecord
     NOT_AVAILABLE
   end
 
+  def gateway_wallet_kind_support
+    return unless gateway_implements?(:support_wallet_kind?)
+
+    errors.add(:gateway, "#{gateway} can't be used as a #{kind} wallet") unless service.adapter.support_wallet_kind?(kind)
+  end
+
   def to_wallet_api_settings
     settings.compact.deep_symbolize_keys.merge(address: address)
   end
@@ -137,8 +179,12 @@ class Wallet < ApplicationRecord
     ::WalletService.new(self)
   end
 
+  def gateway_implements?(method_name)
+    service.adapter.class.instance_methods(false).include?(method_name)
+  end
+
   def generate_settings
-    results = service.create_address!('peatio', {})
+    results = service.create_address!("#{id}_#{kind}_wallet", {})
     {
       address: results[:address],
       secret: results[:secret]
@@ -147,16 +193,17 @@ class Wallet < ApplicationRecord
 end
 
 # == Schema Information
-# Schema version: 20201125134745
+# Schema version: 20210805134633
 #
 # Table name: wallets
 #
-#  id                 :integer          not null, primary key
+#  id                 :bigint           not null, primary key
 #  blockchain_key     :string(32)
 #  name               :string(64)
 #  address            :string(255)      not null
 #  kind               :integer          not null
 #  gateway            :string(20)       default(""), not null
+#  plain_settings     :json
 #  settings_encrypted :string(1024)
 #  balance            :json
 #  max_balance        :decimal(32, 16)  default(0.0), not null

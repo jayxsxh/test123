@@ -21,9 +21,11 @@ module API
                      values: { value: -> { Currency.visible.codes(bothcase: true) }, message: 'account.currency.doesnt_exist' },
                      as: :currency_id,
                      desc: 'Beneficiary currency code.'
+            optional :blockchain_key,
+                     values: { value: -> { ::Blockchain.pluck(:key) }, message: 'account.beneficiary.blockchain_key_doesnt_exist' },
+                     desc: 'Blockchain key of the requested beneficiary'
             optional :state,
-                     type: String,
-                     values: { value: -> { ::Beneficiary::STATES_AVAILABLE_FOR_MEMBER.map(&:to_s) }, message: 'account.beneficiary.invalid_state'},
+                     values: { value: ->(v) { (Array.wrap(v) - ::Beneficiary::STATES_AVAILABLE_FOR_MEMBER.map(&:to_s)).blank? }, message: 'account.beneficiary.invalid_state'},
                      desc: 'Defines either beneficiary active - user can use it to withdraw money'\
                            'or pending - requires beneficiary activation with pin.'
 
@@ -40,8 +42,11 @@ module API
               .tap do |q|
                 q.where!(state: params[:state]) if params[:state].present?
               end
+              .tap do |q|
+                q.where!(blockchain_key: params[:blockchain_key]) if params[:blockchain_key].present?
+              end
               .yield_self do |b|
-                present paginate(b), with: API::V2::Entities::Beneficiary
+                present paginate(b), with: API::V2::Entities::Beneficiary, current_user: current_user
               end
           end
 
@@ -60,18 +65,20 @@ module API
               .beneficiaries
               .available_to_member
               .find_by!(id: params[:id])
-              .yield_self { |b| present b, with: API::V2::Entities::Beneficiary }
+              .yield_self { |b| present b, with: API::V2::Entities::Beneficiary, current_user: current_user }
           end
 
           desc 'Create new beneficiary',
                success: API::V2::Entities::Beneficiary
-
           params do
             requires :currency,
                      type: String,
                      values: { value: -> { Currency.visible.codes(bothcase: true) }, message: 'account.currency.doesnt_exist' },
                      as: :currency_id,
                      desc: 'Beneficiary currency code.'
+            optional :blockchain_key,
+                     values: { value: -> { ::Blockchain.pluck(:key) }, message: 'account.beneficiary.blockchain_key_doesnt_exist' },
+                     desc: 'Blockchain key of the requested beneficiary'
             requires :name,
                      type: String,
                      allow_blank: false,
@@ -85,15 +92,24 @@ module API
                      type: { value: JSON, message: 'account.beneficiary.non_json_data' },
                      allow_blank: false,
                      desc: 'Beneficiary data in JSON format'
+            requires :otp,
+                     type: { value: Integer, message: 'account.beneficiary.non_integer_otp' },
+                     allow_blank: false,
+                     desc: 'OTP to perform action'
           end
           post do
             user_authorize! :create, ::Beneficiary
-
             declared_params = declared(params)
 
-            currency = Currency.find_by!(id: params[:currency_id])
+            unless Vault::TOTP.validate?(current_user.uid, params[:otp])
+              error!({ errors: ['account.withdraw.invalid_otp'] }, 422)
+            end
 
-            if !currency.withdrawal_enabled?
+            currency = Currency.find_by!(id: params[:currency_id])
+            blockchain_currency = BlockchainCurrency.find_network(params[:blockchain_key], params[:currency_id])
+            error!({ errors: ['account.beneficiary.network_not_found'] }, 422) unless blockchain_currency.present?
+
+            if !blockchain_currency.withdrawal_enabled?
               error!({ errors: ['account.currency.withdrawal_disabled'] }, 422)
             elsif currency.coin? && declared_params.dig(:data, :address).blank?
               error!({ errors: ['account.beneficiary.missing_address_in_data'] }, 422)
@@ -114,8 +130,8 @@ module API
 
             present current_user
                       .beneficiaries
-                      .create!(declared_params),
-                    with: API::V2::Entities::Beneficiary
+                      .create!(declared_params.merge('blockchain_key': blockchain_currency.blockchain_key).except(:otp)),
+                    with: API::V2::Entities::Beneficiary, current_user: current_user
           rescue ActiveRecord::RecordInvalid => e
             report_exception(e)
             error!({ errors: ['account.beneficiary.failed_to_create'] }, 422)
@@ -147,7 +163,6 @@ module API
             status 204
           end
 
-
           desc 'Activates beneficiary with pin',
                success: API::V2::Entities::Beneficiary
 
@@ -172,10 +187,50 @@ module API
               error!({ errors: ['account.beneficiary.cant_activate'] }, 422)
             end
 
+            if beneficiary.pin != params[:pin]
+              error!({ errors: ['account.beneficiary.invalid_pin'] }, 422)
+            end
+
+            if beneficiary.expire_at < Time.now
+              error!({ errors: ['account.beneficiary.pin_expired'] }, 422)
+            end
+
             if beneficiary.activate!(params[:pin])
               present beneficiary, with: API::V2::Entities::Beneficiary
             else
               error!({ errors: ['account.beneficiary.invalid_pin'] }, 422)
+            end
+          end
+
+          desc 'Update beneficiary'
+          params do
+            requires :id,
+                     type: { value: Integer, message: 'account.beneficiary.non_integer_id' },
+                     desc: 'Beneficiary Identifier in Database'
+            requires :state,
+                     type: String,
+                     values: { value: -> { %w[active disabled] }, message: 'account.beneficiary.invalid_state'},
+                     desc: 'Beneficiary state'
+            requires :otp,
+                     type: { value: Integer, message: 'account.beneficiary.non_integer_otp' },
+                     allow_blank: false,
+                     desc: 'OTP to perform action'
+          end
+          put ':id' do
+            user_authorize! :update, ::Beneficiary
+
+            beneficiary = current_user.beneficiaries
+                                      .available_to_member
+                                      .find_by!(id: params[:id])
+
+            unless Vault::TOTP.validate?(current_user.uid, params[:otp])
+              error!({ errors: ['account.withdraw.invalid_otp'] }, 422)
+            end
+
+            if beneficiary.update(state: params[:state])
+              present beneficiary, with: API::V2::Entities::Beneficiary, current_user: current_user
+            else
+              error!({ errors: ['account.beneficiary.cant_update'] }, 422)
             end
           end
 
@@ -185,9 +240,17 @@ module API
             requires :id,
                      type: { value: Integer, message: 'account.beneficiary.non_integer_id' },
                      desc: 'Beneficiary Identifier in Database'
+            requires :otp,
+                     type: { value: Integer, message: 'account.beneficiary.non_integer_otp' },
+                     allow_blank: false,
+                     desc: 'OTP to perform action'
           end
           delete ':id' do
             user_authorize! :destroy, ::Beneficiary
+
+            unless Vault::TOTP.validate?(current_user.uid, params[:otp])
+              error!({ errors: ['account.withdraw.invalid_otp'] }, 422)
+            end
 
             beneficiary = current_user
                             .beneficiaries

@@ -17,6 +17,14 @@ module API
         end
 
         expose(
+          :blockchain_key,
+          documentation:{
+            type: String,
+            desc: 'Unique key to identify blockchain.'
+          }
+        )
+
+        expose(
           :address,
           documentation: {
             desc: 'Payment address.',
@@ -33,7 +41,7 @@ module API
             type: String
           }
         ) do |pa|
-          pa.address.present? ? 'active' : 'pending'
+          pa.status
         end
       end
     end

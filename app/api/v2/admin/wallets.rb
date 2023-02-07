@@ -17,7 +17,7 @@ module API
               desc: -> { API::V2::Admin::Entities::Wallet.documentation[:max_balance][:desc] }
             },
             status: {
-              values: { value: %w(active disabled), message: 'admin.wallet.invalid_status' },
+              values: { value: Wallet::STATES, message: 'admin.wallet.invalid_status' },
               default: 'active',
               desc: -> { API::V2::Admin::Entities::Wallet.documentation[:status][:desc] }
             },
@@ -33,6 +33,15 @@ module API
             OPTIONAL_WALLET_PARAMS.each do |key, params|
               optional key, params.except(:default)
             end
+          end
+        end
+
+        desc 'Get wallets overview'
+        get '/wallets/overview' do
+          admin_authorize! :read, ::Wallet
+
+          Rails.cache.fetch(:wallet_overview, expires_in: 60) do
+            Helpers::WalletOverviewBuilder.new(::Currency.coins.active, ::BlockchainCurrency.active).info
           end
         end
 
@@ -64,7 +73,8 @@ module API
 
           search = ::Wallet.ransack(ransack_params)
           search.sorts = "#{params[:order_by]} #{params[:ordering]}"
-          present paginate(search.result.includes(:currencies).distinct), with: API::V2::Admin::Entities::Wallet
+
+          present paginate(::Wallet.uniq(search.result.includes(:currencies))), with: API::V2::Admin::Entities::Wallet
         end
 
         desc 'List wallet kinds.'
@@ -128,6 +138,9 @@ module API
             optional :secret,
                      desc: -> { 'Wallet secret setting' }
           end
+          optional :plain_settings, type: JSON,
+                                    default: {},
+                                    desc: -> { 'Wallet plain settings (external_wallet_id)' }
           exactly_one_of :currencies, :currency, message: 'admin.wallet.currencies_field_is_missing'
         end
         post '/wallets/new' do
@@ -169,6 +182,9 @@ module API
                    types: [String, Array], coerce_with: ->(c) { Array.wrap(c) },
                    as: :currency_ids,
                    desc: -> { API::V2::Admin::Entities::Wallet.documentation[:currencies][:desc] }
+          optional :plain_settings, type: JSON,
+                   default: {},
+                   desc: -> { 'Wallet plain settings (external_wallet_id)' }
           optional :settings, type: JSON,
                               desc: -> { 'Wallet settings' } do
             optional :uri,

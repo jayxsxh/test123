@@ -23,6 +23,13 @@ describe Beneficiary, 'Relationships' do
       it { expect(subject.valid?).to be_falsey }
     end
   end
+
+  context 'belongs to blockchain' do
+    context 'null blockchain_key' do
+      subject { build(:beneficiary, currency: Currency.find(:eth), blockchain_key: nil) }
+      it { expect(subject.valid?).to be_falsey }
+    end
+  end
 end
 
 describe Beneficiary, 'Validations' do
@@ -39,6 +46,29 @@ describe Beneficiary, 'Validations' do
       subject { build(:beneficiary) }
       before { Beneficiary.expects(:generate_pin).returns(3.14) }
       it { expect(subject.valid?).to be_falsey }
+    end
+  end
+
+  context 'data regex' do
+    subject { build(:beneficiary) }
+    let(:full_name) { Faker::Name.name_with_middle }
+    let(:fiat) { Currency.find(:usd)}
+
+    it { expect(subject.valid?).to be_truthy }
+
+    context 'invalid symbols' do
+      subject { build(:beneficiary, currency: fiat, data: {bank_name: '<img>Name', full_name: full_name}) }
+
+      it do
+        expect(subject.valid?).to be_falsey
+        expect(subject.errors.full_messages).to include "Data only letters, digits \"(\", \")\", \"=\", \"?\", \"&\", \"-\", \",\", \"\'\", \"/\", \":\", \".\", \"~\" and space allowed"
+      end
+    end
+
+    context 'url data' do
+      subject { build(:beneficiary, currency: fiat, data: {bank_logo: 'https://bank.gov.ua/logos/bank/nbu.png', full_name: full_name}) }
+
+      it { expect(subject.valid?).to be_truthy }
     end
   end
 
@@ -71,16 +101,28 @@ describe Beneficiary, 'Validations' do
     end
 
     context 'coin' do
+      let(:coin) { Currency.find(:btc)}
+
       context 'blank address' do
-        let(:coin) { Currency.find(:btc)}
         subject { build(:beneficiary, currency_id: coin).tap { |b| b.data.delete('address') } }
+        it { expect(subject.valid?).to be_falsey }
+      end
+
+      context 'blank blockchain key' do
+        subject { build(:beneficiary, currency_id: coin).tap { |b| b.data.delete('blockchain_key') } }
         it { expect(subject.valid?).to be_falsey }
       end
     end
   end
 
   context 'data full_name presence' do
-    # TODO: Write me.
+    let(:fiat) { Currency.find(:usd) }
+    subject { build(:beneficiary, currency: fiat, data:{}) }
+
+    it do
+      expect(subject.valid?).to be_falsey
+      expect(subject.errors.full_messages).to include "Data full_name can't be blank"
+    end
   end
 end
 

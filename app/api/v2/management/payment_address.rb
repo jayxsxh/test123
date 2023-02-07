@@ -27,13 +27,16 @@ module API
           member = Member.find_by(uid: params[:uid]) if params[:uid].present?
 
           currency = Currency.find(params[:currency])
-          unless currency.deposit_enabled?
-            error!({ errors: ['account.currency.deposit_disabled'] }, 422)
+          blockchain_currency = BlockchainCurrency.find_network(params[:blockchain_key], params[:currency])
+          error!({ errors: ['management.payment_address.network_not_found'] }, 422) unless blockchain_currency.present?
+
+          unless blockchain_currency.deposit_enabled?
+            error!({ errors: ['management.currency.deposit_disabled'] }, 422)
           end
 
-          wallet = Wallet.deposit_wallet(currency.id)
+          wallet = Wallet.active_deposit_wallet(currency.id, blockchain_currency.blockchain_key)
           unless wallet.present?
-            error!({ errors: ['account.wallet.not_found'] }, 422)
+            error!({ errors: ['management.wallet.not_found'] }, 422)
           end
 
           unless params[:remote].nil?
@@ -41,7 +44,7 @@ module API
           else
             pa = member.payment_address!(wallet.id)
           end
-          
+
           wallet_service = WalletService.new(wallet)
 
           begin

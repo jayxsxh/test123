@@ -5,22 +5,20 @@
 # TODO: Delete this class and update type column
 module Withdraws
   class Coin < Withdraw
-    has_one :blockchain, through: :currency
-
     before_validation do
-      next unless blockchain_api&.supports_cash_addr_format? && rid?
+      next unless blockchain.blockchain_api&.supports_cash_addr_format? && rid?
       self.rid = CashAddr::Converter.to_cash_address(rid) if CashAddr::Converter.is_valid?(rid)
     end
 
     before_validation do
-      if blockchain_api.present? && blockchain_api.case_sensitive? == false
+      if blockchain.blockchain_api.present? && blockchain_api.case_sensitive? == false
         self.rid  = rid.try(:downcase)
         self.txid = txid.try(:downcase)
       end
     end
 
     validate do
-      if blockchain_api&.supports_cash_addr_format? && rid?
+      if blockchain.blockchain_api&.supports_cash_addr_format? && rid?
         errors.add(:rid, :invalid) unless CashAddr::Converter.is_valid?(rid)
       end
     end
@@ -32,14 +30,15 @@ module Withdraws
 end
 
 # == Schema Information
-# Schema version: 20210201100941
+# Schema version: 20211001083227
 #
 # Table name: withdraws
 #
-#  id             :integer          not null, primary key
-#  member_id      :integer          not null
+#  id             :bigint           not null, primary key
+#  member_id      :bigint           not null
 #  beneficiary_id :bigint
 #  currency_id    :string(10)       not null
+#  blockchain_key :string(255)      not null
 #  amount         :decimal(32, 16)  not null
 #  fee            :decimal(32, 16)  not null
 #  txid           :string(128)
@@ -49,7 +48,8 @@ end
 #  type           :string(30)       not null
 #  transfer_type  :integer
 #  tid            :string(64)       not null
-#  rid            :string(256)      not null
+#  rid            :string(105)      not null
+#  remote_id      :string(255)
 #  note           :string(256)
 #  metadata       :json
 #  error          :json

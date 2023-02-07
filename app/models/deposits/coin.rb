@@ -5,21 +5,19 @@
 # TODO: Delete this class and update type column
 module Deposits
   class Coin < Deposit
-    has_one :blockchain, through: :currency
-
     validate { errors.add(:currency, :invalid) if currency && !currency.coin? }
     validates :address, :txid, presence: true
     validates :txid, uniqueness: { scope: %i[currency_id txout] }
 
     before_validation do
-      if blockchain_api.present? && blockchain_api.case_sensitive? == false
+      if blockchain.blockchain_api.present? && blockchain_api.case_sensitive? == false
         self.txid = txid.try(:downcase)
         self.address = address.try(:downcase)
       end
     end
 
     before_validation do
-      next unless blockchain_api&.supports_cash_addr_format? && address?
+      next unless blockchain.blockchain_api&.supports_cash_addr_format? && address?
       self.address = CashAddr::Converter.to_cash_address(address)
     end
 
@@ -30,17 +28,18 @@ module Deposits
 end
 
 # == Schema Information
-# Schema version: 20200827105929
+# Schema version: 20211001083227
 #
 # Table name: deposits
 #
-#  id             :integer          not null, primary key
-#  member_id      :integer          not null
+#  id             :bigint           not null, primary key
+#  member_id      :bigint           not null
 #  currency_id    :string(10)       not null
+#  blockchain_key :string(255)      not null
 #  amount         :decimal(32, 16)  not null
 #  fee            :decimal(32, 16)  not null
-#  address        :string(95)
-#  from_addresses :string(1000)
+#  address        :string(105)
+#  from_addresses :text(65535)
 #  txid           :string(128)
 #  txout          :integer
 #  aasm_state     :string(30)       not null
@@ -49,6 +48,7 @@ end
 #  transfer_type  :integer
 #  tid            :string(64)       not null
 #  spread         :string(1000)
+#  error          :json
 #  created_at     :datetime         not null
 #  updated_at     :datetime         not null
 #  completed_at   :datetime

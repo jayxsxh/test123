@@ -9,27 +9,27 @@ module API
         helpers ::API::V2::ParamHelpers
 
         desc 'Get a currency' do
-          success Entities::Currency
+          success API::V2::Public::Entities::Currency
         end
         params do
           requires :id,
                    type: String,
                    values: { value: -> { Currency.visible.codes(bothcase: true) }, message: 'public.currency.doesnt_exist'},
-                   desc: -> { API::V2::Entities::Currency.documentation[:id][:desc] }
+                   desc: -> { API::V2::Public::Entities::Currency.documentation[:id][:desc] }
         end
         get '/currencies/:id', requirements: { id: /[\w\.\-]+/ } do
-          present Currency.find(params[:id]), with: API::V2::Entities::Currency
+          present Currency.find(params[:id]), with: API::V2::Public::Entities::Currency
         end
 
         desc 'Get list of currencies',
           is_array: true,
-          success: Entities::Currency
+          success: API::V2::Public::Entities::Currency
         params do
           use :pagination
           optional :type,
                    type: String,
                    values: { value: %w[fiat coin], message: 'public.currency.invalid_type' },
-                   desc: -> { API::V2::Entities::Currency.documentation[:type][:desc] }
+                   desc: -> { API::V2::Public::Entities::Currency.documentation[:type][:desc] }
           optional :search, type: JSON, default: {} do
             optional :code,
                      type: String,
@@ -47,12 +47,12 @@ module API
 
           present paginate(Rails.cache.fetch("currencies_#{params}", expires_in: 600) do
             currencies = Currency.visible.ordered
-            currencies = currencies.where(type: params[:type]).includes(:blockchain) if params[:type] == 'coin'
+            currencies = currencies.where(type: params[:type]) if params[:type] == 'coin'
             currencies = currencies.where(type: params[:type]) if params[:type] == 'fiat'
 
             search = currencies.ransack(search_attrs)
             search.result.load.to_a
-          end), with: API::V2::Entities::Currency
+          end), with: API::V2::Public::Entities::Currency
         end
       end
     end

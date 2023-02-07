@@ -63,6 +63,65 @@ module API
           )
 
           expose(
+            :min_deposit_amount,
+            documentation: {
+              desc: 'Minimal deposit amount in platform currency',
+            }
+          )
+
+          expose(
+            :withdraw_fee,
+            documentation: {
+              desc: 'Blockchain currency withdraw fee in platform currency',
+            }
+          )
+
+          expose(
+            :min_withdraw_amount,
+            documentation: {
+              desc: 'Minimal withdraw amount in platform currency',
+            }
+          )
+
+          expose(
+            :collection_gas_speed,
+            documentation: {
+              desc: 'Deposit collection gas speed'
+            }
+          )
+
+          expose(
+            :withdrawal_gas_speed,
+            documentation: {
+              desc: 'Withdrawal gas speed'
+            }
+          )
+
+          expose(
+            :description,
+            documentation:{
+              type: String,
+              desc: 'Blockchain description.'
+            }
+          )
+
+          expose(
+            :warning,
+            documentation:{
+              type: String,
+              desc: 'Blockchain warning.'
+            }
+          )
+
+          expose(
+            :protocol,
+            documentation:{
+              type: String,
+              desc: 'Blockchain protocol.'
+            }
+          )
+
+          expose(
             :min_confirmations,
             documentation:{
               type: Integer,

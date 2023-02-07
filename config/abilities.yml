@@ -10,6 +10,7 @@ roles:
   - trader
   - maker
   - sa_maker
+  - reporter
 
 admin_permissions:
   superadmin:
@@ -28,6 +29,7 @@ admin_permissions:
       - WithdrawLimit
       - Blockchain
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - TradingFee
@@ -58,11 +60,12 @@ admin_permissions:
       - WithdrawLimit
       - Blockchain
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - TradingFee
       - Wallet
-      - Adjustment 
+      - Adjustment
       - InternalTransfer
       - WhitelistedSmartContract
     read:
@@ -86,6 +89,7 @@ admin_permissions:
       - WithdrawLimit
       - Blockchain
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - TradingFee
@@ -108,6 +112,7 @@ admin_permissions:
       - WithdrawLimit
       - Blockchain
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - TradingFee
@@ -132,6 +137,7 @@ admin_permissions:
       - Deposit
       - Withdraw
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - Trade
@@ -149,12 +155,25 @@ admin_permissions:
       - Deposit
       - Withdraw
       - Currency
+      - BlockchainCurrency
       - Engine
       - Market
       - Trade
       - Order
       - InternalTransfer
-
+  reporter:
+    read:
+      - Operations::Revenue
+      - Operations::Account
+      - Operations::Asset
+      - Operations::Expense
+      - Operations::Liability
+      - Deposit
+      - Withdraw
+      - Currency
+      - BlockchainCurrency
+      - Wallet
+      - Blockchain
 user_permissions:
   superadmin:
     manage: all
@@ -175,6 +194,8 @@ user_permissions:
   trader:
     manage: all
   maker:
+    manage: all
+  reporter:
     manage: all
   sa_maker:
     read:

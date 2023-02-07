@@ -25,6 +25,9 @@ module API
                    desc: -> { API::V2::Admin::Entities::Deposit.documentation[:tid][:desc] }
           optional :email,
                   desc: -> { API::V2::Admin::Entities::Deposit.documentation[:email][:desc] }
+          optional :blockchain_key,
+                   values: { value: -> { ::Blockchain.pluck(:key) }, message: 'admin.beneficiary.blockchain_key_doesnt_exist' },
+                   desc: 'Blockchain key of the requested deposit'
           use :uid
           use :currency
           use :currency_type
@@ -36,7 +39,7 @@ module API
           admin_authorize! :read, ::Deposit
 
           ransack_params = Helpers::RansackBuilder.new(params)
-                             .eq(:id, :txid, :tid, :address)
+                             .eq(:id, :txid, :tid, :address, :blockchain_key)
                              .translate(state: :aasm_state, uid: :member_uid, currency: :currency_id, email: :member_email)
                              .with_daterange
                              .merge(type_eq: params[:type].present? ? "Deposits::#{params[:type].capitalize}" : nil)
@@ -58,12 +61,6 @@ module API
                    type: String,
                    values: { value: -> { ::Deposit.aasm.events.map(&:name).map(&:to_s) }, message: 'admin.deposit.invalid_action' },
                    desc: "Valid actions are #{::Deposit.aasm.events.map(&:name)}."
-          given action: ->(val) { val == 'process' } do
-            optional :fees,
-                     type: Boolean,
-                     default: false,
-                     desc: 'Process deposit collection with collecting fees or not'
-          end
         end
         post '/deposits/actions' do
           admin_authorize! :update, ::Deposit
@@ -88,6 +85,9 @@ module API
           requires :currency,
                    values: { value: -> { Currency.fiats.codes(bothcase: true) }, message: 'admin.deposit.currency_doesnt_exist' },
                    desc: -> { API::V2::Admin::Entities::Deposit.documentation[:currency][:desc] }
+          requires :blockchain_key,
+                   values: { value: -> { ::Blockchain.pluck(:key) }, message: 'admin.beneficiary.blockchain_key_doesnt_exist' },
+                   desc: 'Blockchain key of the requested beneficiary'
           requires :amount,
                    type: { value: BigDecimal, message: 'admin.deposit.non_decimal_amount' },
                    desc: -> { API::V2::Admin::Entities::Deposit.documentation[:amount][:desc] }
@@ -100,7 +100,7 @@ module API
           declared_params = declared(params, include_missing: false)
           member   = Member.find_by(uid: declared_params[:uid])
           currency = Currency.find(declared_params[:currency])
-          data     = { member: member, currency: currency }.merge!(declared_params.slice(:amount, :tid))
+          data     = { member: member, currency: currency, blockchain_key: declared_params[:blockchain_key] }.merge!(declared_params.slice(:amount, :tid))
           deposit  = ::Deposits::Fiat.new(data)
 
           if deposit.save
@@ -122,7 +122,7 @@ module API
                    desc: -> { API::V2::Admin::Entities::Refund.documentation[:address][:desc] }
         end
         post '/deposits/:id/refund' do
-          admin_authorize! :wrrie, ::Deposit
+          admin_authorize! :write, ::Deposit
 
           deposit = Deposit.find(params[:id])
 
@@ -146,6 +146,9 @@ module API
                    values: { value: -> { Currency.codes }, message: 'admin.deposit.currency_doesnt_exist' },
                    as: :currency_id,
                    desc: -> { API::V2::Admin::Entities::Deposit.documentation[:currency][:desc] }
+          requires :blockchain_key,
+                   values: { value: -> { ::Blockchain.pluck(:key) }, message: 'admin.beneficiary.blockchain_key_doesnt_exist' },
+                   desc: 'Blockchain key of the requested beneficiary'
           given :currency_id do
             optional :address_format,
                     type: String,
@@ -159,13 +162,16 @@ module API
 
           member   = Member.find_by!(uid: params[:uid])
           currency = Currency.find_by!(id: params[:currency_id])
-          wallet   = Wallet.deposit_wallet(currency.id)
+          blockchain_currency = BlockchainCurrency.find_network(params[:blockchain_key], currency.id)
+          error!({ errors: ['admin.deposit.network_not_found'] }, 422) unless blockchain_currency.present?
+
+          wallet = Wallet.active_deposit_wallet(currency.id, blockchain_currency.blockchain_key)
 
           unless wallet.present?
             error!({ errors: ['admin.deposit.wallet_not_found'] }, 422)
           end
 
-          if currency.deposit_enabled
+          if blockchain_currency.deposit_enabled
             payment_address = member.payment_address(wallet.id)
             present payment_address, with: API::V2::Entities::PaymentAddress, address_format: params[:address_format]
             status 201

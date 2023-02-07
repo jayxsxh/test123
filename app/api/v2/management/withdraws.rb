@@ -10,6 +10,10 @@ module API
           def perform_action(withdraw, action)
             withdraw.with_lock do
               case action
+                when 'review'
+                  withdraw.accept!
+                  withdraw.process!
+                  withdraw.review!
                 when 'process'
                   withdraw.accept!
                   # Process fiat withdraw immediately. Crypto withdraws will be processed by workers.
@@ -20,6 +24,10 @@ module API
                   end
                 when 'cancel'
                   withdraw.cancel!
+                when 'reject'
+                  withdraw.reject!
+                when 'success'
+                  withdraw.success!
               end
             end
           end
@@ -30,11 +38,12 @@ module API
           success API::V2::Management::Entities::Withdraw
         end
         params do
-          optional :uid,      type: String,  desc: 'The shared user ID.'
+          optional :uid, type: String,  desc: 'The shared user ID.'
           optional :currency, type: String,  values: -> { Currency.codes(bothcase: true) }, desc: 'The currency code.'
-          optional :page,     type: Integer, default: 1,   integer_gt_zero: true, desc: 'The page number (defaults to 1).'
-          optional :limit,    type: Integer, default: 100, range: 1..1000, desc: 'The number of objects per page (defaults to 100, maximum is 1000).'
-          optional :state,    type: String,  values: -> { Withdraw::STATES.map(&:to_s) }, desc: 'The state to filter by.'
+          optional :page, type: Integer, default: 1, integer_gt_zero: true, desc: 'The page number (defaults to 1).'
+          optional :blockchain_key, type: String, values: -> { ::Blockchain.pluck(:key) }, desc: 'Blockchain key of the requested withdrawal'
+          optional :limit, type: Integer, default: 100, range: 1..1000, desc: 'The number of objects per page (defaults to 100, maximum is 1000).'
+          optional :state, type: String,  values: -> { Withdraw::STATES.map(&:to_s) }, desc: 'The state to filter by.'
         end
         post '/withdraws' do
           currency = Currency.find(params[:currency]) if params[:currency].present?
@@ -46,6 +55,7 @@ module API
             .tap { |q| q.where!(currency: currency) if currency }
             .tap { |q| q.where!(member: member) if member }
             .tap { |q| q.where!(aasm_state: params[:state]) if params[:state] }
+            .tap { |q| q.where!(blockchain_key: params[:blockchain_key]) if params[:blockchain_key] }
             .page(params[:page])
             .per(params[:limit])
             .tap { |q| present q, with: API::V2::Management::Entities::Withdraw }
@@ -83,29 +93,36 @@ module API
           optional :tid,            type: String, desc: 'The shared transaction ID. Must not exceed 64 characters. Peatio will generate one automatically unless supplied.'
           optional :rid,            type: String, desc: 'The beneficiary ID or wallet address on the Blockchain.'
           optional :beneficiary_id, type: String, desc: 'ID of Active Beneficiary belonging to user.'
+          optional :blockchain_key, type: String, values: -> { ::Blockchain.pluck(:key) }, desc: 'Blockchain key of the requested withdrawal'
           requires :currency,       type: String, values: -> { Currency.codes(bothcase: true) }, desc: 'The currency code.'
           requires :amount,         type: BigDecimal, desc: 'The amount to withdraw.'
           optional :note,           type: String, desc: 'The note for withdraw.'
-          optional :action,         type: String, values: %w[process], desc: 'The action to perform.'
+          optional :action,         type: String, values: %w[process review], desc: 'The action to perform.'
           optional :transfer_type,  type: String,
                                     values: { value: -> { Withdraw::TRANSFER_TYPES.keys }, message: 'account.withdraw.transfer_type_not_in_list' },
                                     desc: -> { API::V2::Admin::Entities::Withdraw.documentation[:transfer_type][:desc] }
 
           exactly_one_of :rid, :beneficiary_id
+          exactly_one_of :beneficiary_id, :blockchain_key
         end
         post '/withdraws/new' do
           member = Member.find_by(uid: params[:uid])
-
-          currency = Currency.find(params[:currency])
-          unless currency.withdrawal_enabled?
-            error!({ errors: ['management.currency.withdrawal_disabled'] }, 422)
-          end
 
           beneficiary = Beneficiary.find_by(id: params[:beneficiary_id]) if params[:beneficiary_id].present?
           if params[:rid].blank? && beneficiary.blank?
             error!({ errors: ['management.beneficiary.doesnt_exist'] }, 422)
           elsif params[:rid].blank? && !beneficiary&.active?
             error!({ errors: ['management.beneficiary.invalid_state_for_withdrawal'] }, 422)
+          end
+
+          currency = Currency.find(params[:currency])
+          blockchain_key = beneficiary.present? ? beneficiary.blockchain_key : params[:blockchain_key]
+
+          blockchain_currency = BlockchainCurrency.find_network(blockchain_key, params[:currency])
+          error!({ errors: ['management.withdraws.network_not_found'] }, 422) unless blockchain_currency.present?
+
+          unless blockchain_currency.withdrawal_enabled?
+            error!({ errors: ['management.currency.withdrawal_disabled'] }, 422)
           end
 
           if params[:tid].present?
@@ -116,7 +133,8 @@ module API
             sum: params[:amount],
             member: member,
             currency: currency,
-            tid: params[:tid]
+            tid: params[:tid],
+            blockchain_key: blockchain_key
           )
 
           declared_params.merge!(beneficiary: beneficiary) if params[:beneficiary_id].present?
@@ -137,12 +155,15 @@ module API
         desc 'Performs action on withdraw.' do
           @settings[:scope] = :write_withdraws
           detail '«process» – system will lock the money, check for suspected activity, validate recipient address, and initiate the processing of the withdraw. ' \
-                '«cancel»  – system will mark withdraw as «canceled», and unlock the money.'
+                '«cancel»  – system will mark withdraw as «canceled», and unlock the money.' \
+                '«reject»  – system will mark withdraw as «rejected», and unlock the money.' \
+                '«review»  – system will mark withdraw as «under_review», and lock the money.' \
+                '«success»  – system will mark withdraw as «succeed», and subtract the money from the account. (works only with fiat)'
           success API::V2::Management::Entities::Withdraw
         end
         params do
           requires :tid,    type: String, desc: 'The shared transaction ID.'
-          requires :action, type: String, values: %w[process cancel], desc: 'The action to perform.'
+          requires :action, type: String, values: %w[process cancel reject review success], desc: 'The action to perform.'
         end
         put '/withdraws/action' do
           record = Withdraw.find_by!(params.slice(:tid))

@@ -18,6 +18,8 @@ class Deposit < ApplicationRecord
 
   belongs_to :currency, required: true
   belongs_to :member, required: true
+  belongs_to :blockchain, foreign_key: :blockchain_key, primary_key: :key, required: true
+  belongs_to :blockchain_currency, class_name: 'BlockchainCurrency', foreign_key: %i[blockchain_key currency_id], primary_key: %i[blockchain_key currency_id]
 
   acts_as_eventable prefix: 'deposit', on: %i[create update]
 
@@ -28,7 +30,7 @@ class Deposit < ApplicationRecord
   validates :amount,
             numericality: {
               greater_than_or_equal_to:
-                -> (deposit){ deposit.currency.min_deposit_amount }
+                -> (deposit) { deposit.blockchain_currency.min_deposit_amount }
             }, on: :create
 
   scope :recent, -> { order(id: :desc) }
@@ -45,15 +47,23 @@ class Deposit < ApplicationRecord
     state :aml_suspicious
     state :processing
     state :skipped
+    state :collecting
     state :collected
+    state :fee_collecting
     state :fee_processing
+    state :fee_collected
     state :errored
+    state :refunding
     event(:cancel) { transitions from: :submitted, to: :canceled }
     event(:reject) { transitions from: :submitted, to: :rejected }
+
     event :accept do
       transitions from: :submitted, to: :accepted
+
       after do
-        if currency.coin? && Peatio::App.config.deposit_funds_locked
+        if currency.coin? && (Peatio::App.config.deposit_funds_locked ||
+                              Peatio::AML.adapter.present? ||
+                              Peatio::App.config.manual_deposit_approval)
           account.plus_locked_funds(amount)
         else
           account.plus_funds(amount)
@@ -66,41 +76,65 @@ class Deposit < ApplicationRecord
     end
 
     event :process do
-      if Peatio::AML.adapter.present?
-        transitions from: %i[aml_processing aml_suspicious accepted errored], to: :aml_processing do
-          after do
-            process_collect! if aml_check!
-          end
+      transitions from: %i[aml_processing aml_suspicious accepted errored], to: :aml_processing do
+        guard do
+          Peatio::AML.adapter.present? || Peatio::App.config.manual_deposit_approval
         end
-      else
-        transitions from: %i[accepted skipped errored], to: :processing do
-          guard { currency.coin? }
+
+        after do
+          process_collect! if aml_check!
         end
+      end
+
+      transitions from: %i[accepted skipped errored], to: :processing do
+        guard { currency.coin? }
       end
     end
 
-    event :fee_process do
-      transitions from: %i[accepted processing skipped], to: :fee_processing do
+    event :process_deposit_collection do
+      transitions from: %i[processing fee_collected], to: :collecting
+      after_commit do
+        dispatch! if spread.map { |d| d[:status] == 'skipped' }.all?(true)
+      end
+    end
+
+    event :process_fee_collection do
+      transitions from: :processing, to: :fee_collecting
+    end
+
+    event :confirm_fee_collection do
+      transitions from: %i[accepted processing skipped fee_collecting], to: :fee_collected do
         guard { currency.coin? }
       end
     end
 
     event :err do
-      transitions from: %i[processing fee_processing], to: :errored, after: :add_error
+      transitions from: %i[processing collecting fee_collecting], to: :errored, after: :add_error
     end
 
     event :process_collect do
       transitions from: %i[aml_processing aml_suspicious], to: :processing do
-        guard { currency.coin? }
+        guard do
+          currency.coin? && (Peatio::AML.adapter.present? || Peatio::App.config.manual_deposit_approval)
+        end
+
+        after do
+          if !Peatio::App.config.deposit_funds_locked
+            account.unlock_funds(amount)
+            record_complete_operations!
+          end
+        end
       end
-    end if Peatio::AML.adapter.present?
+    end
 
     event :aml_suspicious do
-      transitions from: :aml_processing, to: :aml_suspicious
-    end if Peatio::AML.adapter.present?
+      transitions from: :aml_processing, to: :aml_suspicious do
+        guard { Peatio::AML.adapter.present? || Peatio::App.config.manual_deposit_approval  }
+      end
+    end
 
     event :dispatch do
-      transitions from: %i[processing fee_processing], to: :collected
+      transitions from: %i[collecting], to: :collected
       after do
         if Peatio::App.config.deposit_funds_locked
           account.unlock_funds(amount)
@@ -117,6 +151,10 @@ class Deposit < ApplicationRecord
   end
 
   def aml_check!
+    # If there is no AML adapter on a platform and manual deposit approval enabled
+    # system will return nil value to not proceed with automatic deposit collection in aml cron job
+    return nil if Peatio::App.config.manual_deposit_approval && Peatio::AML.adapter.blank?
+
     from_addresses.each do |address|
       result = Peatio::AML.check!(address, currency_id, member.uid)
       if result.risk_detected
@@ -128,8 +166,10 @@ class Deposit < ApplicationRecord
     true
   end
 
+  delegate :protocol, :warning, to: :blockchain
+
   def blockchain_api
-    currency.blockchain_api
+    blockchain.blockchain_api
   end
 
   def confirmations
@@ -156,7 +196,7 @@ class Deposit < ApplicationRecord
   def spread_between_wallets!
     return false if spread.present?
 
-    spread = WalletService.new(Wallet.deposit_wallet(currency_id)).spread_deposit(self)
+    spread = WalletService.new(Wallet.active_deposit_wallet(currency_id, blockchain_key)).spread_deposit(self)
     update!(spread: spread.map(&:as_json))
   end
 
@@ -176,6 +216,16 @@ class Deposit < ApplicationRecord
     self.member = Member.find_by_uid(uid)
   end
 
+  def wallet_state
+    if currency.coin?
+      payment_address = PaymentAddress.find_by_address(address)
+      # In case when wallet was deleted and payment address still exists in DB
+      payment_address.wallet.present? ? payment_address.wallet.status : ''
+    else
+      ''
+    end
+  end
+
   def as_json_for_event_api
     { tid:                      tid,
       user:                     { uid: member.uid, email: member.email },
@@ -183,11 +233,14 @@ class Deposit < ApplicationRecord
       currency:                 currency_id,
       amount:                   amount.to_s('F'),
       state:                    aasm_state,
+      wallet_state:             wallet_state,
       created_at:               created_at.iso8601,
       updated_at:               updated_at.iso8601,
       completed_at:             completed_at&.iso8601,
       blockchain_address:       address,
-      blockchain_txid:          txid }
+      blockchain_txid:          txid,
+      explorer_address:         blockchain&.explorer_address,
+      explorer_transaction:     blockchain&.explorer_transaction }
   end
 
   def completed?
@@ -214,7 +267,8 @@ class Deposit < ApplicationRecord
         member_id: member_id
       )
 
-      kind = currency.coin? && Peatio::App.config.deposit_funds_locked ? :locked : :main
+      locked_kind_check = currency.coin? && (Peatio::App.config.deposit_funds_locked || Peatio::App.config.manual_deposit_approval)
+      kind = locked_kind_check ? :locked : :main
       # Credit locked fiat/crypto Liability account.
       Operations::Liability.credit!(
         amount: amount,
@@ -242,17 +296,18 @@ class Deposit < ApplicationRecord
 end
 
 # == Schema Information
-# Schema version: 20200827105929
+# Schema version: 20211001083227
 #
 # Table name: deposits
 #
-#  id             :integer          not null, primary key
-#  member_id      :integer          not null
+#  id             :bigint           not null, primary key
+#  member_id      :bigint           not null
 #  currency_id    :string(10)       not null
+#  blockchain_key :string(255)      not null
 #  amount         :decimal(32, 16)  not null
 #  fee            :decimal(32, 16)  not null
-#  address        :string(95)
-#  from_addresses :string(1000)
+#  address        :string(105)
+#  from_addresses :text(65535)
 #  txid           :string(128)
 #  txout          :integer
 #  aasm_state     :string(30)       not null
@@ -261,6 +316,7 @@ end
 #  transfer_type  :integer
 #  tid            :string(64)       not null
 #  spread         :string(1000)
+#  error          :json
 #  created_at     :datetime         not null
 #  updated_at     :datetime         not null
 #  completed_at   :datetime

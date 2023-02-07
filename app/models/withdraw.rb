@@ -11,9 +11,10 @@ class Withdraw < ApplicationRecord
                canceled
                failed
                errored
-               confirming].freeze
+               confirming
+               under_review].freeze
   COMPLETED_STATES = %i[succeed rejected canceled failed].freeze
-  SUCCEED_PROCESSING_STATES = %i[prepared accepted skipped processing errored confirming succeed].freeze
+  SUCCEED_PROCESSING_STATES = %i[prepared accepted skipped processing errored confirming succeed under_review].freeze
 
   include AASM
   include AASM::Locking
@@ -29,6 +30,8 @@ class Withdraw < ApplicationRecord
 
   belongs_to :currency, required: true
   belongs_to :member, required: true
+  belongs_to :blockchain, foreign_key: :blockchain_key, primary_key: :key, required: true
+  belongs_to :blockchain_currency, class_name: 'BlockchainCurrency', foreign_key: %i[blockchain_key currency_id], primary_key: %i[blockchain_key currency_id]
 
   # Optional beneficiary association gives ability to support both in-peatio
   # beneficiaries and managed by third party application.
@@ -46,7 +49,11 @@ class Withdraw < ApplicationRecord
   validates :block_number, allow_blank: true, numericality: { greater_than_or_equal_to: 0, only_integer: true }
   validates :sum,
             presence: true,
-            numericality: { greater_than_or_equal_to: ->(withdraw) { withdraw.currency.min_withdraw_amount }}
+            numericality: { greater_than_or_equal_to: ->(withdraw) { withdraw.blockchain_currency.min_withdraw_amount }},
+            on: :create
+
+  validates :blockchain_key,
+            inclusion: { in: ->(_) { Blockchain.pluck(:key).map(&:to_s) } }
 
   validate do
     errors.add(:beneficiary, 'not active') if beneficiary.present? && !beneficiary.active? && !aasm_state.to_sym.in?(COMPLETED_STATES)
@@ -65,6 +72,7 @@ class Withdraw < ApplicationRecord
     state :to_reject
     state :rejected
     state :processing
+    state :under_review
     state :succeed
     state :failed
     state :errored
@@ -93,7 +101,7 @@ class Withdraw < ApplicationRecord
     end
 
     event :reject do
-      transitions from: %i[to_reject accepted confirming], to: :rejected
+      transitions from: %i[to_reject accepted confirming under_review], to: :rejected
       after do
         unlock_funds
         record_cancel_operations!
@@ -113,15 +121,19 @@ class Withdraw < ApplicationRecord
         end
       end
       after_commit do
-        tx = currency.blockchain_api.fetch_transaction(self)
+        tx = blockchain_currency.blockchain_api.fetch_transaction(self)
         if tx.present?
           success! if tx.status.success?
         end
       end
     end
 
+    event :review do
+      transitions from: :processing, to: :under_review
+    end
+
     event :dispatch do
-      transitions from: :processing, to: :confirming do
+      transitions from: %i[processing under_review], to: :confirming do
         # Validate txid presence on coin withdrawal dispatch.
         guard do
           currency.fiat? || txid?
@@ -130,7 +142,7 @@ class Withdraw < ApplicationRecord
     end
 
     event :success do
-      transitions from: %i[confirming errored], to: :succeed do
+      transitions from: %i[confirming errored under_review], to: :succeed do
         guard do
           currency.fiat? || txid?
         end
@@ -146,7 +158,7 @@ class Withdraw < ApplicationRecord
     end
 
     event :fail do
-      transitions from: %i[processing confirming skipped errored], to: :failed
+      transitions from: %i[processing confirming skipped errored under_review], to: :failed
       after do
         unlock_funds
         record_cancel_operations!
@@ -157,6 +169,8 @@ class Withdraw < ApplicationRecord
       transitions from: :processing, to: :errored, after: :add_error
     end
   end
+
+  delegate :protocol, :warning, to: :blockchain
 
   class << self
     def sum_query
@@ -206,7 +220,7 @@ class Withdraw < ApplicationRecord
   end
 
   def blockchain_api
-    currency.blockchain_api
+    blockchain_currency.blockchain_api
   end
 
   def confirmations
@@ -234,7 +248,9 @@ class Withdraw < ApplicationRecord
       created_at:      created_at.iso8601,
       updated_at:      updated_at.iso8601,
       completed_at:    completed_at&.iso8601,
-      blockchain_txid: txid }
+      blockchain_txid: txid,
+      explorer_address: blockchain&.explorer_address,
+      explorer_transaction: blockchain&.explorer_transaction }
   end
 
   private
@@ -320,14 +336,15 @@ class Withdraw < ApplicationRecord
 end
 
 # == Schema Information
-# Schema version: 20201125134745
+# Schema version: 20211001083227
 #
 # Table name: withdraws
 #
-#  id             :integer          not null, primary key
-#  member_id      :integer          not null
+#  id             :bigint           not null, primary key
+#  member_id      :bigint           not null
 #  beneficiary_id :bigint
 #  currency_id    :string(10)       not null
+#  blockchain_key :string(255)      not null
 #  amount         :decimal(32, 16)  not null
 #  fee            :decimal(32, 16)  not null
 #  txid           :string(128)
@@ -337,7 +354,8 @@ end
 #  type           :string(30)       not null
 #  transfer_type  :integer
 #  tid            :string(64)       not null
-#  rid            :string(256)      not null
+#  rid            :string(105)      not null
+#  remote_id      :string(255)
 #  note           :string(256)
 #  metadata       :json
 #  error          :json

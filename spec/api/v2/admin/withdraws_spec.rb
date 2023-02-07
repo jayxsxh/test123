@@ -19,6 +19,8 @@ describe API::V2::Admin::Withdraws, type: :request do
     create(:btc_withdraw, amount: 42.0, sum: 42.0, member: admin, aasm_state: :accepted)
     create(:btc_withdraw, amount: 11.0, sum: 11.0, member: level_3_member, aasm_state: :skipped)
     create(:btc_withdraw, amount: 12.0, sum: 12.0, member: level_3_member, aasm_state: :errored)
+    create(:btc_withdraw, amount: 10.0, sum: 10.0, member: level_3_member, aasm_state: :under_review)
+
   end
 
   describe 'GET /api/v2/admin/withdraws' do
@@ -35,12 +37,22 @@ describe API::V2::Admin::Withdraws, type: :request do
       expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
       expect(actual.map { |a| a['currency'] }).to match_array expected.map(&:currency_id)
       expect(actual.map { |a| a['member'] }).to match_array expected.map(&:member_id)
+      expect(actual.map { |a| a['blockchain_key'] }).to match_array expected.map(&:blockchain_key)
       expect(actual.map { |a| a['type'] }).to match_array(expected.map { |d| d.currency.coin? ? 'coin' : 'fiat' })
       expect(actual.map { |a| a['uid'] }).to match_array(expected.map { |d| d.member.uid })
       expect(actual.map { |a| a['email'] }).to match_array(expected.map { |d| d.member.email })
     end
 
     context 'ordering' do
+      it 'default descending by id' do
+        api_get url, token: token, params: { order_by: 'id' }
+
+        actual = JSON.parse(response.body)
+        expected = Withdraw.order(id: 'desc')
+
+        expect(actual.map { |a| a['id'] }).to eq expected.map(&:id)
+      end
+
       it 'ascending by id' do
         api_get url, token: token, params: { order_by: 'id', ordering: 'asc' }
 
@@ -72,6 +84,7 @@ describe API::V2::Admin::Withdraws, type: :request do
         expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
         expect(actual.map { |a| a['currency'] }).to match_array expected.map(&:currency_id)
         expect(actual.map { |a| a['member'] }).to all eq level_3_member.id
+        expect(actual.map { |a| a['blockchain_key'] }).to match_array expected.map(&:blockchain_key)
         expect(actual.map { |a| a['type'] }).to match_array(expected.map { |d| d.currency.coin? ? 'coin' : 'fiat' })
         expect(actual.map { |a| a['uid'] }).to match_array(expected.map { |d| d.member.uid })
         expect(actual.map { |a| a['email'] }).to match_array(expected.map { |d| d.member.email })
@@ -87,18 +100,20 @@ describe API::V2::Admin::Withdraws, type: :request do
         expect(actual.length).to eq expected.count
         expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
         expect(actual.map { |a| a['uid'] }).to match_array(expected.map { |d| d.member.uid })
+        expect(actual.map { |a| a['blockchain_key'] }).to match_array expected.map(&:blockchain_key)
       end
 
       it 'by multiple states' do
-        api_get url, token: token, params: { state: [:skipped, :accepted] }
+        api_get url, token: token, params: { state: [:skipped, :accepted, :under_review] }
 
         actual = JSON.parse(response.body)
-        expected = Withdraw.where(aasm_state: [:skipped, :accepted])
+        expected = Withdraw.where(aasm_state: [:skipped, :accepted, :under_review])
 
-        expect(actual.map { |a| a['state'] }.uniq).to match_array %w[skipped accepted]
+        expect(actual.map { |a| a['state'] }.uniq).to match_array %w[skipped accepted under_review]
         expect(actual.length).to eq expected.count
         expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
         expect(actual.map { |a| a['uid'] }).to match_array(expected.map { |d| d.member.uid })
+        expect(actual.map { |a| a['blockchain_key'] }).to match_array(expected.map { |d| d.blockchain_key })
       end
 
       it 'by type' do
@@ -111,6 +126,7 @@ describe API::V2::Admin::Withdraws, type: :request do
         expect(actual.map { |a| a['state'] }).to match_array expected.map(&:aasm_state)
         expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
         expect(actual.map { |a| a['currency'] }).to match_array expected.map(&:currency_id)
+        expect(actual.map { |a| a['blockchain_key'] }).to match_array expected.map(&:blockchain_key)
         expect(actual.map { |a| a['member'] }).to match_array expected.map(&:member_id)
         expect(actual.map { |a| a['type'] }).to all eq 'coin'
       end
@@ -125,8 +141,24 @@ describe API::V2::Admin::Withdraws, type: :request do
         expect(actual.first['state']).to eq expected.aasm_state
         expect(actual.first['id']).to eq expected.id
         expect(actual.first['currency']).to eq expected.currency_id
+        expect(actual.first['blockchain_key']).to eq expected.blockchain_key
         expect(actual.first['member']).to eq expected.member_id
         expect(actual.first['type']).to eq 'coin'
+      end
+
+      it 'by blockchain_key' do
+        api_get url, token: token, params: { blockchain_key: 'btc-testnet' }
+
+        actual = JSON.parse(response.body)
+        expected = Withdraw.where(type: 'Withdraws::Coin')
+
+        expect(actual.length).to eq expected.length
+        expect(actual.map { |a| a['state'] }).to match_array expected.map(&:aasm_state)
+        expect(actual.map { |a| a['id'] }).to match_array expected.map(&:id)
+        expect(actual.map { |a| a['currency'] }).to match_array expected.map(&:currency_id)
+        expect(actual.map { |a| a['blockchain_key'] }).to match_array expected.map(&:blockchain_key)
+        expect(actual.map { |a| a['member'] }).to match_array expected.map(&:member_id)
+        expect(actual.map { |a| a['type'] }).to all eq 'coin'
       end
 
       it 'by wallet_type' do
@@ -164,7 +196,7 @@ describe API::V2::Admin::Withdraws, type: :request do
       context 'has beneficiary' do
         let!(:withdraw) { create(:usd_withdraw, :with_beneficiary, :with_deposit_liability) }
         it 'includes beneficiary in withdrawal payload' do
-          beneficiary_json = API::V2::Entities::Beneficiary
+          beneficiary_json = API::V2::Admin::Entities::Beneficiary
                                .represent(withdraw.beneficiary)
                                .as_json
                                .deep_stringify_keys
@@ -263,6 +295,7 @@ describe API::V2::Admin::Withdraws, type: :request do
 
     context 'updates withdraw' do
       before { [coin, fiat].map(&:accept!) }
+      let!(:tx) { Transaction.create(txid: coin.txid, reference: coin, kind: 'tx', from_address: 'fake_address', to_address: coin.rid, blockchain_key: coin.blockchain_key, status: :pending, currency_id: coin.currency_id) }
 
       it 'process coin' do
         api_post url, token: token, params: { action: 'process', id: coin.id }

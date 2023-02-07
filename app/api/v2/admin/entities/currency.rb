@@ -17,87 +17,24 @@ module API
           )
 
           expose(
-            :blockchain_key,
+            :default_network_id,
             documentation: {
-                type: String,
-                desc: 'Associated blockchain key which will perform transactions synchronization for currency.'
-            },
-            if: -> (currency){ currency.coin? }
-          )
-
-          expose(
-            :parent_id,
-            documentation: {
-              desc: 'Parent currency id.',
+              desc: 'Default network id.',
               type: String
+            }
+          )
+
+          expose(
+            :networks,
+            using: API::V2::Admin::Entities::BlockchainCurrency,
+            documentation: {
+              type: 'API::V2::Admin::Entities::BlockchainCurrency',
+              is_array: true,
+              desc: 'Currency networks.'
             },
-            if: -> (currency){ currency.token? }
-          )
-
-          expose(
-            :min_collection_amount,
-            documentation: {
-              type: BigDecimal,
-              desc: 'Minimal collection amount.'
-            }
-          )
-
-          expose(
-            :position,
-            documentation: {
-              type: Integer,
-              desc: 'Currency position.'
-            }
-          )
-
-          expose(
-            :visible,
-            documentation: {
-              type: String,
-              desc: 'Currency display status (true/false).'
-            }
-          )
-
-          expose(
-            :base_factor,
-            documentation: {
-              type: Integer,
-              desc: 'Currency base factor.'
-            }
-          )
-
-          expose(
-            :subunits,
-            documentation: {
-              type: Integer,
-              desc: 'Fraction of the basic monetary unit.'
-            }
-          ) { |currency| currency.subunits }
-
-          expose(
-            :options,
-            documentation: {
-              type: JSON,
-              desc: 'Currency options.'
-            },
-            if: -> (currency){ currency.coin? }
-          )
-
-          expose(
-            :precision,
-            documentation: {
-              type: Integer,
-              desc: 'Currency precision.'
-            }
-          )
-
-          expose(
-            :price,
-            documentation: {
-              type: BigDecimal,
-              desc: 'Currency price.'
-            }
-          )
+          ) do |c|
+            c.blockchain_currencies
+          end
 
           expose(
             :created_at,

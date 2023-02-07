@@ -7,30 +7,37 @@ class WalletService
   end
 
   def create_address!(uid, pa_details)
+    blockchain_currency = BlockchainCurrency.find_by(currency_id: @wallet.currencies.map(&:id),
+                                                     blockchain_key: @wallet.blockchain_key)
+
     @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: @wallet.currencies.first.to_blockchain_api_settings)
+                       currency: blockchain_currency.to_blockchain_api_settings)
     @adapter.create_address!(uid: uid, pa_details: pa_details)
   end
 
   def build_withdrawal!(withdrawal)
+    blockchain_currency = BlockchainCurrency.find_by(currency: withdrawal.currency,
+                                                     blockchain_key: @wallet.blockchain_key)
     @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: withdrawal.currency.to_blockchain_api_settings)
+                       currency: blockchain_currency.to_blockchain_api_settings)
     transaction = Peatio::Transaction.new(to_address: withdrawal.rid,
                                           amount:     withdrawal.amount,
                                           currency_id: withdrawal.currency_id,
                                           options: { tid: withdrawal.tid })
     transaction = @adapter.create_transaction!(transaction)
-    save_transaction(transaction.as_json.merge(from_address: @wallet.address), withdrawal) if transaction.present?
+    save_transaction(transaction.as_json.merge(from_address: @wallet.address, kind: 'tx', blockchain_key: @wallet.blockchain_key), withdrawal) if transaction.present?
     transaction
   end
 
   def spread_deposit(deposit)
+    blockchain_currency = BlockchainCurrency.find_by(currency: deposit.currency,
+                                                     blockchain_key: @wallet.blockchain_key)
     @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: deposit.currency.to_blockchain_api_settings)
+                       currency: blockchain_currency.to_blockchain_api_settings)
 
     destination_wallets =
       Wallet.active.withdraw.ordered
-        .joins(:currencies).where(currencies: { id: deposit.currency_id })
+        .joins(:currencies).where(currencies: { id: deposit.currency_id }, blockchain_key: @wallet.blockchain_key)
         .map do |w|
         # NOTE: Consider min_collection_amount is defined per wallet.
         #       For now min_collection_amount is currency config.
@@ -38,8 +45,9 @@ class WalletService
           balance:                 w.current_balance(deposit.currency),
           # Wallet max_balance will be in the platform currency
           max_balance:             (w.max_balance / deposit.currency.get_price.to_d).round(deposit.currency.precision, BigDecimal::ROUND_DOWN),
-          min_collection_amount:   deposit.currency.min_collection_amount,
-          skip_deposit_collection: w.service.skip_deposit_collection? }
+          min_collection_amount:   blockchain_currency.min_collection_amount,
+          skip_deposit_collection: w.service.skip_deposit_collection?,
+          plain_settings:          w.plain_settings }
       end
     raise StandardError, "destination wallets don't exist" if destination_wallets.blank?
 
@@ -58,8 +66,10 @@ class WalletService
 
   # TODO: We don't need deposit_spread anymore.
   def collect_deposit!(deposit, deposit_spread)
+    blockchain_currency = BlockchainCurrency.find_by(currency: deposit.currency,
+                                                     blockchain_key: @wallet.blockchain_key)
     @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: deposit.currency.to_blockchain_api_settings)
+                       currency: blockchain_currency.to_blockchain_api_settings)
 
     pa = PaymentAddress.find_by(wallet_id: @wallet.id, member: deposit.member, address: deposit.address)
     # NOTE: Deposit wallet configuration is tricky because wallet URI
@@ -77,7 +87,7 @@ class WalletService
       # In #spread_deposit valid transactions saved with pending state
       if transaction.status.pending?
         transaction = @adapter.create_transaction!(transaction, subtract_fee: true)
-        save_transaction(transaction.as_json.merge(from_address: deposit.address), deposit) if transaction.present?
+        save_transaction(transaction.as_json.merge(from_address: deposit.address, kind: 'tx', blockchain_key: @wallet.blockchain_key), deposit) if transaction.present?
       end
       transaction
     end
@@ -85,8 +95,18 @@ class WalletService
 
   # TODO: We don't need deposit_spread anymore.
   def deposit_collection_fees!(deposit, deposit_spread)
-    @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: deposit.currency.to_blockchain_api_settings)
+    blockchain_currency = BlockchainCurrency.find_by(currency: deposit.currency,
+                                                     blockchain_key: @wallet.blockchain_key)
+    configs = {
+      wallet:   @wallet.to_wallet_api_settings,
+      currency: blockchain_currency.to_blockchain_api_settings(withdrawal_gas_speed=false)
+    }
+
+    if blockchain_currency.parent_id?
+      configs.merge!(parent_currency: blockchain_currency.parent.to_blockchain_api_settings)
+    end
+
+    @adapter.configure(configs)
     deposit_transaction = Peatio::Transaction.new(hash:         deposit.txid,
                                                   txout:        deposit.txout,
                                                   to_address:   deposit.address,
@@ -96,25 +116,52 @@ class WalletService
     transactions = @adapter.prepare_deposit_collection!(deposit_transaction,
                                                         # In #spread_deposit valid transactions saved with pending state
                                                         deposit_spread.select { |t| t.status.pending? },
-                                                        deposit.currency.to_blockchain_api_settings)
+                                                        blockchain_currency.to_blockchain_api_settings)
 
     if transactions.present?
-      deposit.update(spread: deposit.spread.map { |s| s.merge(options: transactions.first.options) })
-      transactions.each { |t| save_transaction(t.as_json.merge(from_address: @wallet.address), deposit) }
+      updated_spread = deposit.spread.map do |s|
+        deposit_options = s.fetch(:options, {}).symbolize_keys
+        transaction_options = transactions.first.options.presence || {}
+        general_options = deposit_options.merge(transaction_options)
+
+        s.merge(options: general_options)
+      end
+
+      deposit.update(spread: updated_spread)
+      transactions.each { |t| save_transaction(t.as_json.merge(from_address: @wallet.address, kind: 'tx_prebuild', blockchain_key: @wallet.blockchain_key), deposit) }
     end
     transactions
   end
 
   def refund!(refund)
-    refund_transaction = Peatio::Transaction.new(to_address: refund.address,
-                                                 amount: refund.deposit.amount)
+    blockchain_currency = BlockchainCurrency.find_by(currency: refund.deposit.currency,
+                                                     blockchain_key: @wallet.blockchain_key)
+    @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
+                       currency: blockchain_currency.to_blockchain_api_settings)
 
+    pa = PaymentAddress.find_by(wallet_id: @wallet.id, member: refund.deposit.member, address: refund.deposit.address)
+    # NOTE: Deposit wallet configuration is tricky because wallet URI
+    #       is saved on Wallet model but wallet address and secret
+    #       are saved in PaymentAddress.
+    @adapter.configure(
+      wallet: @wallet.to_wallet_api_settings
+                     .merge(pa.details.symbolize_keys)
+                     .merge(address: pa.address)
+                     .tap { |s| s.merge!(secret: pa.secret) if pa.secret.present? }
+                     .compact
+    )
+
+    refund_transaction = Peatio::Transaction.new(to_address: refund.address,
+                                                 amount: refund.deposit.amount,
+                                                 currency_id: refund.deposit.currency_id)
     @adapter.create_transaction!(refund_transaction, subtract_fee: true)
   end
 
   def load_balance!(currency)
+    blockchain_currency = BlockchainCurrency.find_by(currency: currency,
+                                                     blockchain_key: @wallet.blockchain_key)
     @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: currency)
+                       currency: blockchain_currency.to_blockchain_api_settings)
     @adapter.load_balance!
   rescue Peatio::Wallet::Error => e
     report_exception(e)
@@ -130,8 +177,23 @@ class WalletService
   end
 
   def trigger_webhook_event(event)
-    @adapter.configure(wallet:   @wallet.to_wallet_api_settings,
-                       currency: @wallet.currencies.first.to_blockchain_api_settings)
+    # If there are erc20 currencies we should configure parent currency here
+    currency = if @wallet.gateway_implements?(:extract_asset_id)
+                 code = @adapter.extract_asset_id(event)
+                 @wallet.currencies.find { |e| e.id == code }
+               else
+                 @wallet.currencies.find { |e| e.parent_id.nil? }
+               end
+    return if currency.blank?
+
+    blockchain_currency = BlockchainCurrency.find_by(currency_id: currency.id,
+                                                     blockchain_key: @wallet.blockchain_key)
+
+    # We return if specified currency does not exist or linked to the wallet
+    return if blockchain_currency.blank?
+
+    @adapter.configure(wallet: @wallet.to_wallet_api_settings,
+                       currency: blockchain_currency.to_blockchain_api_settings)
     @adapter.trigger_webhook_event(event)
   end
 
@@ -170,9 +232,13 @@ class WalletService
         left_amount = 0
       end
 
-      transaction = Peatio::Transaction.new(to_address:  dw[:address],
-                                            amount:      amount_for_wallet.to_d,
-                                            currency_id: deposit.currency_id)
+      transaction_params = { to_address:  dw[:address],
+                             amount: amount_for_wallet.to_d,
+                             currency_id: deposit.currency_id,
+                             options:     dw[:plain_settings]
+                           }.compact
+
+      transaction = Peatio::Transaction.new(transaction_params)
 
       # Tx will not be collected to this destination wallet
       transaction.status = :skipped if dw[:skip_deposit_collection]

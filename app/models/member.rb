@@ -17,11 +17,14 @@ class Member < ApplicationRecord
   before_validation :downcase_email
 
   validates :uid, length: { maximum: 32 }
-  validates :email, presence: true, uniqueness: true, email: true
+  validates :email, allow_blank: true, uniqueness: true, email: true
   validates :level, numericality: { greater_than_or_equal_to: 0 }
   validates :role, inclusion: { in: ::Ability.roles }
 
-  before_create { self.group = self.group.strip.downcase }
+  before_create do
+    self.group = group.strip.downcase
+    self.beneficiaries_whitelisting = Peatio::App.config.force_beneficiaries_whitelisting
+  end
 
   class << self
     def groups
@@ -43,16 +46,16 @@ class Member < ApplicationRecord
 
   def get_account(model_or_id_or_code)
     if model_or_id_or_code.is_a?(String) || model_or_id_or_code.is_a?(Symbol)
-      accounts.find_or_create_by(currency_id: model_or_id_or_code)
+      accounts.find_or_create_by(currency_id: model_or_id_or_code, type: ::Account::DEFAULT_TYPE)
     elsif model_or_id_or_code.is_a?(Currency)
-      accounts.find_or_create_by(currency: model_or_id_or_code)
+      accounts.find_or_create_by(currency: model_or_id_or_code, type: ::Account::DEFAULT_TYPE)
     end
   # Thread Safe Account creation
   rescue ActiveRecord::RecordNotUnique
     if model_or_id_or_code.is_a?(String) || model_or_id_or_code.is_a?(Symbol)
-      accounts.find_by(currency_id: model_or_id_or_code)
+      accounts.find_by(currency_id: model_or_id_or_code, type: ::Account::DEFAULT_TYPE)
     elsif model_or_id_or_code.is_a?(Currency)
-      accounts.find_by(currency: model_or_id_or_code)
+      accounts.find_by(currency: model_or_id_or_code, type: ::Account::DEFAULT_TYPE)
     end
   end
 
@@ -169,6 +172,7 @@ class Member < ApplicationRecord
         m.level = params[:level]
       end
       member.assign_attributes(params)
+      member.beneficiaries_whitelisting = true if Peatio::App.config.force_beneficiaries_whitelisting
       member.save! if member.changed?
       member
     end
@@ -191,8 +195,9 @@ class Member < ApplicationRecord
 
     def fetch_email(payload)
       payload[:email].to_s.tap do |email|
-        raise(Peatio::Auth::Error, 'E-Mail is blank.') if email.blank?
-        raise(Peatio::Auth::Error, 'E-Mail is invalid.') unless EmailValidator.valid?(email)
+        if email.present?
+         raise(Peatio::Auth::Error, 'E-Mail is invalid.') unless EmailValidator.valid?(email)
+        end
       end
     end
 
@@ -213,20 +218,20 @@ class Member < ApplicationRecord
 end
 
 # == Schema Information
-# Schema version: 20201207134745
+# Schema version: 20210909120210
 #
 # Table name: members
 #
-#  id         :integer          not null, primary key
+#  id         :bigint           not null, primary key
 #  uid        :string(32)       not null
-#  email      :string(255)      not null
-#  username   :string(255)
+#  email      :string(255)
 #  level      :integer          not null
 #  role       :string(16)       not null
 #  group      :string(32)       default("vip-0"), not null
 #  state      :string(16)       not null
 #  created_at :datetime         not null
 #  updated_at :datetime         not null
+#  username   :string(255)
 #
 # Indexes
 #

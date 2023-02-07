@@ -207,6 +207,14 @@ describe Withdraw do
         expect(subject.rejected?).to be true
       end
 
+      it 'transitions from :under_review to :rejected after calling #reject!' do
+        subject.process!
+        subject.review!
+        subject.reject!
+
+        expect(subject.rejected?).to be true
+      end
+
       context 'from to_rejected' do
         before do
           subject.update(aasm_state: :to_reject)
@@ -265,6 +273,15 @@ describe Withdraw do
       end
 
       it 'transitions from :confirming to :success after calling #success!' do
+        subject.success!
+
+        expect(subject.succeed?).to be true
+      end
+
+      it 'transitions from :under_review to :success after calling #success!' do
+        subject.accept!
+        subject.process!
+        subject.review!
         subject.success!
 
         expect(subject.succeed?).to be true
@@ -360,6 +377,7 @@ describe Withdraw do
 
     context :fail do
       subject { create(:btc_withdraw, :with_deposit_liability) }
+      let!(:transaction) { Transaction.create(txid: subject.txid, reference: subject, kind: 'tx', from_address: 'fake_address', to_address: subject.rid, blockchain_key: subject.blockchain_key, status: :pending, currency_id: subject.currency_id) }
 
       before { subject.accept! }
       before { subject.accept! }
@@ -379,6 +397,17 @@ describe Withdraw do
       context 'from skipped' do
         before do
           subject.update!(aasm_state: :skipped)
+        end
+
+        it do
+          subject.fail!
+          expect(subject.failed?).to be true
+        end
+      end
+
+      context 'from under_review' do
+        before do
+          subject.update!(aasm_state: :under_review)
         end
 
         it do
@@ -414,11 +443,25 @@ describe Withdraw do
         end
       end
     end
+
+    context :review do
+      before do
+        subject.accept!
+      end
+
+      it 'transitions from :processing to :under_review after calling #review!' do
+        subject.process!
+        subject.review!
+
+
+        expect(subject.under_review?).to be true
+      end
+    end
   end
 
   context 'fee is set to fixed value of 10' do
     let(:withdraw) { create(:usd_withdraw, :with_deposit_liability, sum: 200) }
-    before { Currency.any_instance.expects(:withdraw_fee).once.returns(10) }
+    before { BlockchainCurrency.any_instance.expects(:withdraw_fee).once.returns(10) }
     it 'computes fee' do
       expect(withdraw.fee).to eql 10.to_d
       expect(withdraw.amount).to eql 190.to_d
@@ -429,7 +472,7 @@ describe Withdraw do
     let(:member) { create(:member) }
     let!(:account) { member.get_account(:usd).tap { |x| x.update!(balance: 200.0.to_d) } }
     let(:withdraw) { build(:usd_withdraw, sum: 200, member: member) }
-    before { Currency.any_instance.expects(:withdraw_fee).once.returns(200) }
+    before { BlockchainCurrency.any_instance.expects(:withdraw_fee).once.returns(200) }
     it 'fails validation' do
       expect(withdraw.save).to eq false
       expect(withdraw.errors[:amount]).to match(["must be greater than 0.0"])
@@ -515,7 +558,7 @@ describe Withdraw do
     subject { build(:btc_withdraw, sum: 0.1, member: member) }
 
     before do
-      Currency.find('btc').update(min_withdraw_amount: 0.5.to_d)
+      BlockchainCurrency.find_by(currency_id: 'btc').update(min_withdraw_amount: 0.5.to_d)
     end
 
     it { expect(subject).not_to be_valid }
@@ -533,12 +576,14 @@ describe Withdraw do
     let(:address)   { 'bitcoincash:qqkv9wr69ry2p9l53lxp635va4h86wv435995w8p2h' }
 
     let :record do
-      Withdraws::Coin.new \
-        currency: Currency.find(:btc),
-        member:   member,
-        rid:      address,
-        sum:      1.0.to_d,
-        note:     note
+      Withdraw.new \
+        currency:       Currency.find(:btc),
+        blockchain_key: 'btc-testnet',
+        type:           'Withdraws::Coin',
+        member:         member,
+        rid:            address,
+        sum:            1.0.to_d,
+        note:           note
     end
 
     context 'valid note' do

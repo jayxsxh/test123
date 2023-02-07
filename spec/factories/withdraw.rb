@@ -36,6 +36,7 @@ FactoryBot.define do
     rid { Faker::Blockchain::Bitcoin.address }
     sum { 10.to_d }
     type { 'Withdraws::Coin' }
+    blockchain_key { 'btc-testnet' }
   end
 
   factory :eth_withdraw, class: Withdraws::Coin do
@@ -44,6 +45,7 @@ FactoryBot.define do
     rid { Faker::Blockchain::Bitcoin.address }
     sum { 10.to_d }
     type { 'Withdraws::Coin' }
+    blockchain_key { 'eth-rinkeby' }
 
     trait :with_beneficiary do
       beneficiary do
@@ -81,5 +83,6 @@ FactoryBot.define do
     rid { Faker::Bank.iban }
     sum { 1000.to_d }
     type { 'Withdraws::Fiat' }
+    blockchain_key { 'fiat' }
   end
 end
