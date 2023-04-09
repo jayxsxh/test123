@@ -10,7 +10,7 @@ module Jobs::Cron
         if exclude_user_ids.empty?
           filter_trades = ''
         else
-          filter_trades = "AND (trades.taker_id != trades.maker_id OR trades.taker_id NOT IN (#{exclude_user_ids.join(',')}))"
+          filter_trades = "AND trades.maker_id NOT IN (#{exclude_user_ids.join(',')}) AND trades.taker_id NOT IN (#{exclude_user_ids.join(',')})"
         end
 
         query = "
